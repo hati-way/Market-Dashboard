@@ -206,7 +206,7 @@ tr:hover{background:#0a0a1a}
   <button onclick="toggleDbg()" style="background:none;border:none;color:#223322;font-size:10px;cursor:pointer;font-family:inherit">🔧 디버그</button>
 </div>
 <div id="dbgBox"></div>
-<div class="footer">데이터: Yahoo Finance (15~20분 지연시세) · 5분 자동 갱신<br>본 리포트는 참고용이며 투자 손익 책임은 투자자 본인에게 있습니다</div>
+<div class="footer">데이터: Yahoo Finance · 분봉(1m) 기준 · 약 5~10분 지연 · 2분 자동 갱신<br>본 리포트는 참고용이며 투자 손익 책임은 투자자 본인에게 있습니다</div>
 
 <script>
 // ─────────────────────────────────────────────────────────────
@@ -282,68 +282,114 @@ let ST = {gl:[], mac:[], k50:[], upd:null};
 // 핵심 API: 심볼 1개씩 v8 chart 호출 (가장 안정적)
 // 프록시 3개 × Yahoo endpoint 2개 = 최대 6회 시도
 // ─────────────────────────────────────────────────────────────
+// 전략: 2단계 호출
+//   1차) interval=1m range=1d  → 분봉 최신가 (5~10분 내)
+//   2차) interval=1d range=1mo → 일봉 폴백 + RSI 계산용
+// 캐시 버스팅: URL에 _cb=타임스탬프 추가 → 프록시 캐시 우회
+// ─────────────────────────────────────────────────────────────
 const YF_HOSTS = [
   'https://query1.finance.yahoo.com',
   'https://query2.finance.yahoo.com',
 ];
 
-async function fq(sym) {
+// 캐시버스팅 타임스탬프 (5분 단위 반올림 → 같은 배치 내 재사용 허용)
+function cbTs() {
+  return Math.floor(Date.now() / (5 * 60 * 1000));
+}
+
+async function fetchYF(sym, interval, range) {
   for (let pi = 0; pi < PROXIES.length; pi++) {
     for (let hi = 0; hi < YF_HOSTS.length; hi++) {
-      const apiUrl = `${YF_HOSTS[hi]}/v8/finance/chart/${encodeURIComponent(sym)}?range=1mo&interval=1d&includePrePost=false`;
+      const apiUrl =
+        `${YF_HOSTS[hi]}/v8/finance/chart/${encodeURIComponent(sym)}` +
+        `?interval=${interval}&range=${range}&includePrePost=false&_cb=${cbTs()}`;
       try {
         const r = await fetch(PROXIES[pi](apiUrl), {
           signal: AbortSignal.timeout(9000),
-          headers: {'Accept': 'application/json, text/plain, */*'}
+          cache: 'no-store',
+          headers: {
+            'Accept': 'application/json, text/plain, */*',
+            'Cache-Control': 'no-cache, no-store',
+            'Pragma': 'no-cache',
+          }
         });
         if (!r.ok) { dbg(`${sym} HTTP${r.status} p${pi}h${hi}`); continue; }
         let raw = await r.text();
-        if (!raw || raw.length < 30) { dbg(`${sym} empty p${pi}h${hi}`); continue; }
-
-        // JSON 파싱 (allorigins는 {contents:"..."} 래핑)
+        if (!raw || raw.length < 30) continue;
         let data;
-        try { data = JSON.parse(raw); } catch { dbg(`${sym} JSON1 p${pi}h${hi}`); continue; }
+        try { data = JSON.parse(raw); } catch { continue; }
         if (data && typeof data.contents === 'string') {
-          try { data = JSON.parse(data.contents); } catch { dbg(`${sym} JSON2 p${pi}h${hi}`); continue; }
+          try { data = JSON.parse(data.contents); } catch { continue; }
         }
-
         const res = data?.chart?.result?.[0];
-        if (!res) { dbg(`${sym} no result p${pi}h${hi}`); continue; }
-
-        const meta = res.meta || {};
-        const q0   = res.indicators?.quote?.[0] || {};
-        const cl   = (q0.close || []).filter(v => v != null && !isNaN(v) && v > 0);
-
-        // 현재가: meta → 종가 배열 마지막값
-        let price =
-          meta.regularMarketPrice ??
-          meta.currentPrice ??
-          (cl.length ? cl[cl.length - 1] : null);
-
-        if (price == null || isNaN(price) || price <= 0) {
-          dbg(`${sym} no price p${pi}h${hi}`); continue;
-        }
-
-        // 전일 종가: meta → 종가 배열 끝에서 두 번째
-        let prev =
-          meta.chartPreviousClose ??
-          meta.previousClose ??
-          meta.regularMarketPreviousClose ??
-          (cl.length >= 2 ? cl[cl.length - 2] : null);
-
-        const chg = (prev && prev > 0) ? ((price - prev) / prev * 100) : 0;
-        const rsiVal = cl.length >= 15 ? rsi14(cl) : null;
-
-        dbg(`✓ ${sym} ${price.toFixed(1)} (${chg>=0?'+':''}${chg.toFixed(2)}%) p${pi}h${hi} cl:${cl.length}`);
-        return { price, chg, rsi: rsiVal, cl };
-
+        if (!res) continue;
+        return { res, pi, hi };
       } catch(e) {
         dbg(`${sym} ERR p${pi}h${hi}: ${String(e).slice(0, 40)}`);
       }
     }
   }
-  dbg(`✗ FAIL ${sym}`);
   return null;
+}
+
+async function fq(sym) {
+  // ── 1차: 5d 일봉 → 전일 종가를 정확히 확정 ──────────────
+  // cl 배열 마지막 = 당일 장중 갱신값, 끝에서 두 번째 = 전일 확정 종가
+  const r5 = await fetchYF(sym, '1d', '5d');
+  let price = null, prev = null, cl2 = [], rsiVal = null;
+
+  if (r5) {
+    const meta5 = r5.res.meta || {};
+    const q5    = r5.res.indicators?.quote?.[0] || {};
+    const cl5   = (q5.close || []).filter(v => v != null && !isNaN(v) && v > 0);
+
+    // 전일 확정 종가: 배열 끝에서 두 번째 (장중이면 마지막이 미확정)
+    if (cl5.length >= 2) prev = cl5[cl5.length - 2];
+
+    // 현재가: meta regularMarketPrice 최우선
+    price = meta5.regularMarketPrice ?? (cl5.length ? cl5[cl5.length - 1] : null);
+
+    // chartPreviousClose가 prev보다 신뢰도 높은 경우만 사용
+    // (cl5[-2]와 5% 이내로 일치할 때만 → 그 외엔 무시)
+    const metaPrev = meta5.chartPreviousClose ?? meta5.regularMarketPreviousClose ?? null;
+    if (metaPrev && prev && Math.abs(metaPrev - prev) / prev < 0.05) {
+      prev = metaPrev; // meta 값이 cl 값과 거의 같으면 meta 사용 (더 정밀)
+    }
+    dbg(`5d ✓ ${sym} price=${price?.toFixed(2)} prev=${prev?.toFixed(2)} cl:${cl5.length}`);
+  }
+
+  // ── 2차: 1m 분봉 → 현재가만 업데이트 (전일종가는 건드리지 않음) ──
+  const r1 = await fetchYF(sym, '1m', '1d');
+  if (r1) {
+    const meta1 = r1.res.meta || {};
+    const freshPrice = meta1.regularMarketPrice;
+    if (freshPrice && freshPrice > 0) {
+      price = freshPrice; // 분봉에서 더 최신 현재가로 덮어씀
+      dbg(`1m ✓ ${sym} freshPrice=${price.toFixed(2)}`);
+    }
+  }
+
+  // ── 3차: 1mo 일봉 → RSI 계산용 ──────────────────────────
+  const r2 = await fetchYF(sym, '1d', '1mo');
+  if (r2) {
+    const q2 = r2.res.indicators?.quote?.[0] || {};
+    cl2 = (q2.close || []).filter(v => v != null && !isNaN(v) && v > 0);
+    rsiVal = cl2.length >= 15 ? rsi14(cl2) : null;
+
+    // 앞 단계 모두 실패한 경우 최후 폴백
+    if (price == null) price = r2.res.meta?.regularMarketPrice ?? (cl2.length ? cl2[cl2.length-1] : null);
+    if (prev  == null && cl2.length >= 2) prev = cl2[cl2.length - 2];
+    dbg(`1mo ✓ ${sym} rsi=${rsiVal} cl:${cl2.length}`);
+  }
+
+  if (price == null || isNaN(price) || price <= 0) {
+    dbg(`✗ FAIL ${sym}`);
+    return null;
+  }
+
+  const chg = (prev && prev > 0) ? ((price - prev) / prev * 100) : 0;
+  dbg(`✓ FINAL ${sym} = ${price.toFixed(2)} / prev=${prev?.toFixed(2)} → ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% RSI=${rsiVal}`);
+  return { price, chg, rsi: rsiVal, cl: cl2 };
 }
 
 function rsi14(cl, p=14) {
@@ -686,7 +732,7 @@ async function refreshAll(){await fetchAll();}
 document.addEventListener('DOMContentLoaded',()=>{
   updateClock();setInterval(updateClock,1000);
   fetchAll();
-  setInterval(()=>{if(document.getElementById('lov').classList.contains('hid'))fetchAll();},5*60*1000);
+  setInterval(()=>{if(document.getElementById('lov').classList.contains('hid'))fetchAll();},2*60*1000);
 });
 </script>
 </body>
