@@ -206,7 +206,7 @@ tr:hover{background:#0a0a1a}
   <button onclick="toggleDbg()" style="background:none;border:none;color:#223322;font-size:10px;cursor:pointer;font-family:inherit">🔧 디버그</button>
 </div>
 <div id="dbgBox"></div>
-<div class="footer">데이터: Yahoo Finance · 분봉(1m) 기준 · 약 5~10분 지연 · 2분 자동 갱신<br>본 리포트는 참고용이며 투자 손익 책임은 투자자 본인에게 있습니다</div>
+<div class="footer">데이터: Yahoo Finance · 약 5~10분 지연 · 수동 새로고침<br>본 리포트는 참고용이며 투자 손익 책임은 투자자 본인에게 있습니다</div>
 
 <script>
 // ─────────────────────────────────────────────────────────────
@@ -333,63 +333,57 @@ async function fetchYF(sym, interval, range) {
 }
 
 async function fq(sym) {
-  // ── 1차: 5d 일봉 → 전일 종가를 정확히 확정 ──────────────
-  // cl 배열 마지막 = 당일 장중 갱신값, 끝에서 두 번째 = 전일 확정 종가
+  // ── 단일 호출: 1d/5d ──────────────────────────────────────
+  // 5일치 일봉으로 현재가 + 전일확정종가 + RSI폴백 모두 처리
+  // 심볼당 1회만 호출 → 프록시 차단 없음
   const r5 = await fetchYF(sym, '1d', '5d');
-  let price = null, prev = null, cl2 = [], rsiVal = null;
+  if (!r5) { dbg(`✗ FAIL ${sym}`); return null; }
 
-  if (r5) {
-    const meta5 = r5.res.meta || {};
-    const q5    = r5.res.indicators?.quote?.[0] || {};
-    const cl5   = (q5.close || []).filter(v => v != null && !isNaN(v) && v > 0);
+  const meta = r5.res.meta || {};
+  const q0   = r5.res.indicators?.quote?.[0] || {};
+  const cl   = (q0.close || []).filter(v => v != null && !isNaN(v) && v > 0);
 
-    // 전일 확정 종가: 배열 끝에서 두 번째 (장중이면 마지막이 미확정)
-    if (cl5.length >= 2) prev = cl5[cl5.length - 2];
-
-    // 현재가: meta regularMarketPrice 최우선
-    price = meta5.regularMarketPrice ?? (cl5.length ? cl5[cl5.length - 1] : null);
-
-    // chartPreviousClose가 prev보다 신뢰도 높은 경우만 사용
-    // (cl5[-2]와 5% 이내로 일치할 때만 → 그 외엔 무시)
-    const metaPrev = meta5.chartPreviousClose ?? meta5.regularMarketPreviousClose ?? null;
-    if (metaPrev && prev && Math.abs(metaPrev - prev) / prev < 0.05) {
-      prev = metaPrev; // meta 값이 cl 값과 거의 같으면 meta 사용 (더 정밀)
-    }
-    dbg(`5d ✓ ${sym} price=${price?.toFixed(2)} prev=${prev?.toFixed(2)} cl:${cl5.length}`);
+  // 현재가: meta.regularMarketPrice 최우선 (장중 실시간 반영)
+  let price = meta.regularMarketPrice ?? (cl.length ? cl[cl.length - 1] : null);
+  if (price == null || isNaN(price) || price <= 0) {
+    dbg(`✗ FAIL ${sym} no price`); return null;
   }
 
-  // ── 2차: 1m 분봉 → 현재가만 업데이트 (전일종가는 건드리지 않음) ──
-  const r1 = await fetchYF(sym, '1m', '1d');
-  if (r1) {
-    const meta1 = r1.res.meta || {};
-    const freshPrice = meta1.regularMarketPrice;
-    if (freshPrice && freshPrice > 0) {
-      price = freshPrice; // 분봉에서 더 최신 현재가로 덮어씀
-      dbg(`1m ✓ ${sym} freshPrice=${price.toFixed(2)}`);
-    }
-  }
+  // 전일 확정 종가: cl 배열 끝에서 두 번째 값 (가장 신뢰도 높음)
+  // meta의 chartPreviousClose는 수정주가 기준이라 오차 큼 → 사용 안 함
+  let prev = cl.length >= 2 ? cl[cl.length - 2] : null;
 
-  // ── 3차: 1mo 일봉 → RSI 계산용 ──────────────────────────
+  // 단, cl 마지막값이 현재가와 거의 같으면 장 마감 후 → 끝에서 두 번째가 올바른 전일종가
+  // cl 마지막값이 현재가와 많이 다르면 장중 → cl[-1]이 전일 종가, cl[-2]가 그전날
+  // → 장중/장후 모두 cl[-2]가 전일 종가로 안전
+  if (!prev && cl.length === 1) prev = cl[0]; // 데이터 1개뿐인 경우
+
+  const chg = (prev && prev > 0) ? ((price - prev) / prev * 100) : 0;
+
+  // RSI: 5일치론 부족하므로 별도 1mo 호출은 생략,
+  // 이미 가진 cl로 계산 (5일치면 rsi14 불가 → null)
+  // → 1mo RSI는 글로벌 지수 / 거시지표만 계산, K50은 생략 (속도 우선)
+  const rsiVal = cl.length >= 15 ? rsi14(cl) : null;
+
+  dbg(`✓ ${sym} price=${price.toFixed(1)} prev=${prev?.toFixed(1)} chg=${chg.toFixed(2)}%`);
+  return { price, chg, rsi: rsiVal, cl };
+}
+
+// RSI가 필요한 심볼용 (글로벌 지수만) - 1mo 추가 호출
+async function fqWithRsi(sym) {
+  const base = await fq(sym);
+  if (!base) return null;
+
   const r2 = await fetchYF(sym, '1d', '1mo');
   if (r2) {
     const q2 = r2.res.indicators?.quote?.[0] || {};
-    cl2 = (q2.close || []).filter(v => v != null && !isNaN(v) && v > 0);
-    rsiVal = cl2.length >= 15 ? rsi14(cl2) : null;
-
-    // 앞 단계 모두 실패한 경우 최후 폴백
-    if (price == null) price = r2.res.meta?.regularMarketPrice ?? (cl2.length ? cl2[cl2.length-1] : null);
-    if (prev  == null && cl2.length >= 2) prev = cl2[cl2.length - 2];
-    dbg(`1mo ✓ ${sym} rsi=${rsiVal} cl:${cl2.length}`);
+    const cl2 = (q2.close || []).filter(v => v != null && !isNaN(v) && v > 0);
+    if (cl2.length >= 15) {
+      base.rsi = rsi14(cl2);
+      base.cl  = cl2;
+    }
   }
-
-  if (price == null || isNaN(price) || price <= 0) {
-    dbg(`✗ FAIL ${sym}`);
-    return null;
-  }
-
-  const chg = (prev && prev > 0) ? ((price - prev) / prev * 100) : 0;
-  dbg(`✓ FINAL ${sym} = ${price.toFixed(2)} / prev=${prev?.toFixed(2)} → ${chg >= 0 ? '+' : ''}${chg.toFixed(2)}% RSI=${rsiVal}`);
-  return { price, chg, rsi: rsiVal, cl: cl2 };
+  return base;
 }
 
 function rsi14(cl, p=14) {
@@ -423,24 +417,26 @@ function setLd(msg, pct) {
 async function fetchAll() {
   sLoad(true); setSt([{t:'데이터 수집 중...', c:'wn'}]); dbg('=== START ===');
 
-  // 1) 글로벌 지수 병렬 수집
+  // 1) 글로벌 지수 - RSI 포함 (1mo 추가 호출)
   setLd('글로벌 지수 수집 중...', 8);
-  const glRes = await Promise.allSettled(GI.map(d => fq(d.sym)));
+  const glRes = await Promise.allSettled(GI.map(d => fqWithRsi(d.sym)));
   ST.gl = GI.map((d, i) => ({...d, q: glRes[i].value ?? null}));
 
-  // 2) 거시경제 병렬 수집
+  // 2) 거시경제 - RSI 불필요, fq만
   setLd('거시경제 지표 수집 중...', 25);
   const macRes = await Promise.allSettled(MAC.map(d => fq(d.sym)));
   ST.mac = MAC.map((d, i) => ({...d, q: macRes[i].value ?? null}));
 
-  // 3) KOSPI 50 - 8개씩 배치 병렬
+  // 3) KOSPI 50 - 5개씩 순차 배치 (프록시 과부하 방지)
   const kr = [];
-  for (let i = 0; i < K50.length; i += 8) {
-    const batch = K50.slice(i, i + 8);
-    const done  = Math.min(i + 8, 50);
-    setLd(`KOSPI 50 수집 중... (${done}/50)`, 30 + done * 1.4);
+  for (let i = 0; i < K50.length; i += 5) {
+    const batch = K50.slice(i, i + 5);
+    const done  = Math.min(i + 5, 50);
+    setLd(`KOSPI 50 수집 중... (${done}/50)`, 30 + done * 1.3);
     const bRes = await Promise.allSettled(batch.map(d => fq(d.sym)));
     bRes.forEach((r, j) => kr.push({...batch[j], q: r.value ?? null}));
+    // 배치 간 200ms 대기 → 프록시 레이트리밋 회피
+    if (i + 5 < K50.length) await new Promise(res => setTimeout(res, 200));
   }
   ST.k50 = kr;
   ST.upd = new Date();
@@ -732,7 +728,6 @@ async function refreshAll(){await fetchAll();}
 document.addEventListener('DOMContentLoaded',()=>{
   updateClock();setInterval(updateClock,1000);
   fetchAll();
-  setInterval(()=>{if(document.getElementById('lov').classList.contains('hid'))fetchAll();},2*60*1000);
 });
 </script>
 </body>
