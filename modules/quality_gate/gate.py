@@ -8,7 +8,7 @@ Fact Validation(modules/wordpress_writer/fact_validation) 결과가
 """
 from __future__ import annotations
 
-from modules.master_content.schema import MasterContent
+from modules.master_content.schema import MasterContent, WordPressContent
 from modules.wordpress_writer.fact_validation import (
     FactValidationResult,
     FactValidationStatus,
@@ -112,6 +112,40 @@ def run_quality_gate(
         warnings=warnings,
         recommendations=recommendations,
     )
+
+
+def _article_from_wordpress_content(wp: WordPressContent) -> WordPressArticle:
+    """MasterContent.wordpress(WordPressContent)에 이미 저장된 값으로
+    WordPressArticle을 다시 만든다.
+
+    wordpress_writer.generate_wordpress_content()가 생성 직후 검증까지
+    끝낸 값들이므로, 이 결과에 validate_fact_grounding()을 다시 돌리면
+    원래와 같은 FactValidationResult가 나온다(같은 content_markdown +
+    같은 used_fact_ids). pipeline에서 생성이 끝난 MasterContent만 가지고
+    Quality Gate를 돌리기 위한 어댑터다.
+    """
+    return WordPressArticle(
+        title=wp.title,
+        slug=wp.slug,
+        excerpt=wp.excerpt,
+        meta_description=wp.seo.meta_description,
+        content_markdown=wp.content_markdown,
+        primary_keyword=wp.seo.focus_keyword,
+        related_keywords=list(wp.tags),
+        used_fact_ids=list(wp.used_fact_ids),
+        content_html=wp.content_html,
+        source_list=list(wp.source_list),
+    )
+
+
+def run_quality_gate_for_content(
+    content: MasterContent, config: QualityGateConfig = DEFAULT_CONFIG
+) -> QualityGateResult:
+    """생성이 끝난 MasterContent(= content.wordpress가 채워진 상태)만으로
+    Quality Gate를 돌린다. pipeline/orchestrator.py 에서 쓰는 진입점이다.
+    """
+    article = _article_from_wordpress_content(content.wordpress)
+    return run_quality_gate(article, content, config=config)
 
 
 def decide_publication(gate_result: QualityGateResult) -> PublicationDecision:

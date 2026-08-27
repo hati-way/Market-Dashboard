@@ -190,6 +190,10 @@ class WordPressContent(BaseModel):
     # 막는 실제 게이트(quality gate)는 이번 단계에서 구현하지 않는다.
     fact_validation_status: str = ""
     fact_validation_warnings: list[str] = Field(default_factory=list)
+    # 검증을 통과한(존재하지 않는 id는 제외된) fact id 목록. Quality Gate가
+    # 생성 이후 단계에서 WordPressArticle을 다시 만들 때(quality_gate.gate.
+    # run_quality_gate_for_content) 이 값을 그대로 복원해서 쓴다.
+    used_fact_ids: list[str] = Field(default_factory=list)
     seo: SeoMeta = Field(default_factory=SeoMeta)
 
 

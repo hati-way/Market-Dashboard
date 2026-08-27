@@ -12,7 +12,7 @@ Fact Grounding 구조에 맞게 다시 구현했다. 어떤 원칙을 가져오�
 이 모듈은 검사만 한다 — WordPressArticle 본문을 수정하지 않는다.
 """
 from .config import DEFAULT_CONFIG, QualityGateConfig
-from .gate import decide_publication, run_quality_gate
+from .gate import decide_publication, run_quality_gate, run_quality_gate_for_content
 from .models import (
     GateStatus,
     LaneScore,
@@ -24,6 +24,7 @@ from .models import (
 
 __all__ = [
     "run_quality_gate",
+    "run_quality_gate_for_content",
     "decide_publication",
     "QualityGateConfig",
     "DEFAULT_CONFIG",

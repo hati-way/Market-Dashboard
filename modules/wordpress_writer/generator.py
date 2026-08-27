@@ -320,6 +320,7 @@ def generate_wordpress_content(
         source_list=article.source_list,
         fact_validation_status=fact_result.status.value,
         fact_validation_warnings=fact_result.warnings,
+        used_fact_ids=fact_result.used_fact_ids,
         seo=SeoMeta(
             meta_title=article.title,
             meta_description=article.meta_description,

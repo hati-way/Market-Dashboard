@@ -63,11 +63,11 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
 | `modules/data_ingest/` | 1단계: 원본 데이터 → `MarketData` 변환 |
 | `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움. Anthropic Claude 실제 연동, `models.py`(WordPressArticle), `markdown_html.py`(안전한 마크다운→HTML 변환), `fact_validation.py`(Fact ID·숫자/날짜 근거 검증) 포함 |
 | `modules/quality_check/` | 4단계(파이프라인 원래 단계): seo/aeo/geo/neo 개별 checker + 통합 `checker.py` (규칙 기반 pass/fail, 점수 없음) |
-| `modules/quality_gate/` | WordPressArticle 발행 전 최종 판정. fact/seo/aeo/geo/neo 0~100점 + PASS/REVIEW_REQUIRED/FAIL + `decide_publication()`. `modules/quality_check/`와 별개 모듈(의도적으로 통합하지 않음, 아래 참고) |
-| `modules/wordpress_publisher/` | 5단계: 발행 (현재 미구현, `clients/wordpress_client.py` 완성 후 연결) |
+| `modules/quality_gate/` | WordPressArticle 발행 전 최종 판정. fact/seo/aeo/geo/neo 0~100점 + PASS/REVIEW_REQUIRED/FAIL + `decide_publication()`. `run_quality_gate_for_content(content)`로 생성이 끝난 MasterContent에서 바로 돌릴 수 있다. `modules/quality_check/`와 별개 모듈(의도적으로 통합하지 않음, 아래 참고) |
+| `modules/wordpress_publisher/` | 5단계: 실제 WordPress 발행. `models.py`(PublishOutcome/PublishAction). 기본값은 항상 dry-run + draft-first(안전) |
 | `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
 | `modules/performance_tracker/` | 10단계: 성과 기록 (현재 미구현) |
-| `clients/` | 외부 API 클라이언트 (`llm_client.py`는 Anthropic 연동 완료, 나머지는 stub) |
+| `clients/` | 외부 API 클라이언트 (`llm_client.py`=Anthropic, `wordpress_client.py`=WordPress REST API 연동 완료, 나머지는 stub) |
 | `pipeline/orchestrator.py` | 전체 단계를 순서대로 실행하는 오케스트레이터 |
 | `main.py` | CLI 진입점 |
 | `tests/` | 모듈별 + 파이프라인 전체 테스트 |
@@ -147,6 +147,32 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       건드리지 않았고 의도적으로 통합하지 않았다(둘의 목적이 다름).
       본문을 임의로 수정하지 않고 검사만 한다. 테스트:
       `tests/test_quality_gate.py` (14개).
+- [x] **WordPress 실제 발행 연동 + Quality Gate 파이프라인 연결.**
+      `clients/wordpress_client.py`: Application Password(HTTP Basic
+      Auth)로 `/wp-json/wp/v2/*` 호출. `test_connection`/`create_post`/
+      `update_post`/`get_post`/`find_post_by_slug` 제공. timeout/연결
+      오류/429/5xx는 `WordPressRetryableError`(최대 재시도 횟수는
+      `WORDPRESS_MAX_RETRIES`로 설정), 4xx는 `WordPressFatalError`로
+      구분. 인증정보는 요청 `auth=` 파라미터로만 전달하고 로그/예외
+      메시지에 절대 남기지 않는다. `modules/wordpress_publisher/`: Quality
+      Gate 결과(`QualityGateResult`)와 `PublicationDecision`을 받아
+      `PublishOutcome`(action/wordpress_status/post_id/url 등)을 반환.
+      **기본값은 항상 안전한 쪽**: `WORDPRESS_DRY_RUN=true`(기본)면
+      WordPress API를 전혀 호출하지 않고, `WORDPRESS_DRAFT_FIRST=true`
+      (기본)면 PASS여도 곧바로 publish하지 않고 draft로 낮춘다.
+      REVIEW_REQUIRED는 draft-first 설정과 무관하게 항상 draft, FAIL은
+      dry-run 여부와 무관하게 WordPress API를 절대 호출하지 않는다.
+      같은 slug가 이미 있으면 기본 정책(`WORDPRESS_EXISTING_POST_POLICY=
+      skip`)은 아무것도 하지 않고, 이미 발행(publish)된 글은
+      `draft_update` 정책이어도 절대 자동 수정하지 않는다.
+      `pipeline/orchestrator.py`는 `publish=True`일 때만
+      `quality_gate.run_quality_gate_for_content()` →
+      `decide_publication()` → `publish_to_wordpress()`를 순서대로
+      호출한다(`WordPressContent`에 새로 추가한 `used_fact_ids` 필드로
+      생성 시점의 Fact Grounding 검증 결과를 재구성). `main.py`에
+      `--wordpress-test`(연결 확인) / `--dry-run` 플래그 추가. 테스트:
+      `tests/test_wordpress_client.py`(11개), `tests/test_wordpress_publisher.py`
+      (12개), `tests/test_pipeline.py`에 통합 테스트 2개 추가.
 - [x] 기본 테스트 스위트
 
 다음에 할 일 (권장 순서):
@@ -163,23 +189,13 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
      직접 채워야 한다. market_data → analysis 를 채우는 단계를 LLM
      기반으로 새로 만들지, 3단계(wordpress_writer) 이전에 별도 단계로
      둘지 결정 필요
-3. **Quality Gate를 실제 파이프라인에 연결**
-   - 지금은 `modules/quality_gate/`가 독립 모듈로만 존재하고
-     `pipeline/orchestrator.py`/`generate_wordpress_content()`에서
-     자동으로 호출되지 않는다(의도적으로 이번 단계 범위 밖으로 둠).
-     `run_quality_gate(article, content)` 호출 지점을 어디에 둘지
-     (생성 직후? 발행 직전?) 정하고 `PublicationDecision`을
-     `wordpress_publisher`가 참조하도록 연결
-   - `modules/quality_gate/seo_score.py` 등의 점수 계산 방식(특히
-     keyword_repetition_ratio, 문단 길이 등 휴리스틱)은 실제 생성된 글로
-     캘리브레이션이 더 필요할 수 있음
-4. **WordPress 발행 연동** — `clients/wordpress_client.py` +
-   `modules/wordpress_publisher/publisher.py`
-   - WordPress REST API (`/wp-json/wp/v2/posts`)를 Application
-     Password 인증으로 호출
-   - `publish_to_wordpress()`가 `NotImplementedError` 대신 실제
-     `PublishResult`를 반환하도록 완성, `PublicationDecision.publish_ready`
-     를 실제 발행 여부 판단에 사용
+3. **Quality Gate 점수 캘리브레이션** — `modules/quality_gate/seo_score.py`
+   등의 휴리스틱(keyword_repetition_ratio, 문단 길이 등)은 실제 생성된
+   글로 임계값을 재검증할 필요가 있음
+4. **Evergreen 페이지 자동 업데이트** — 지금은 이미 발행된 글을 절대
+   자동 수정하지 않는다(`WORDPRESS_EXISTING_POST_POLICY`가
+   `draft_update`여도 마찬가지). 발행된 글을 최신 데이터로 갱신하는
+   기능은 별도 정책/모듈로 설계 필요
 5. **Search Console 연동** — `clients/search_console_client.py` +
    `modules/performance_tracker/tracker.py`
    - 발행된 글의 URL을 기준으로 성과 데이터를 주기적으로 수집해

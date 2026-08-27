@@ -109,7 +109,12 @@ cp .env.example .env
 `ANTHROPIC_API_KEY`는 3단계(WordPress 글 생성)에서 실제로 사용하므로,
 `python main.py`를 그대로 실행하려면 이 값을 채워야 합니다. (테스트는
 가짜 LLM 응답을 쓰기 때문에 키가 없어도 `pytest`는 그대로 통과합니다.)
-WordPress 발행(5단계)은 아직 미구현이라 관련 값은 비워둬도 됩니다.
+`--publish`로 WordPress 발행까지 시도하려면 `WORDPRESS_URL`/
+`WORDPRESS_USERNAME`/`WORDPRESS_APP_PASSWORD`도 채워야 합니다(안
+채워도 파이프라인 자체는 4단계까지 동작합니다). `WORDPRESS_DRY_RUN`/
+`WORDPRESS_DRAFT_FIRST`는 기본값이 이미 안전(`true`)하므로 그대로
+두는 것을 권장합니다 — 자세한 확인 순서는 아래 "WordPress 발행을
+실제로 확인하는 안전한 순서" 참고.
 
 ### 5. 파이프라인 실행
 
@@ -143,11 +148,26 @@ pytest
 | 2. Master JSON 구조화 | ✅ 동작 (`analysis` 필드: primary_question/facts/sources/bull·bear case 등 포함) |
 | 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + Fact Grounding 검증 포함) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |
-| 5. WordPress 발행 | ❌ 미구현 (`NotImplementedError`) |
+| 5. WordPress 발행 | ✅ 실제 REST API 연동 (`clients/wordpress_client.py`). 기본값은 항상 안전(dry-run + draft-first) |
 | 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동, wordpress 결과만 재사용) |
 | 10. 성과 기록 | ❌ 미구현 |
 | LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 (wordpress_writer 에서 사용 중) |
-| Quality Gate (`modules/quality_gate/`) | ✅ fact/seo/aeo/geo/neo 점수 + PASS/REVIEW_REQUIRED/FAIL + 발행 여부 결정. 독립 모듈이며 아직 파이프라인에 자동 연결되지는 않음 |
+| Quality Gate (`modules/quality_gate/`) | ✅ fact/seo/aeo/geo/neo 점수 + PASS/REVIEW_REQUIRED/FAIL + 발행 여부 결정. `run_quality_gate_for_content()`로 파이프라인 5단계에 연결됨 |
+
+## WordPress 발행을 실제로 확인하는 안전한 순서
+
+`.env`에 `WORDPRESS_URL`/`WORDPRESS_USERNAME`/`WORDPRESS_APP_PASSWORD`를 채운 뒤:
+
+1. **연결만 확인**: `python main.py --wordpress-test`
+2. **dry-run으로 전체 파이프라인 확인** (WordPress API를 전혀 호출하지 않음):
+   `python main.py --topic "테스트" --publish --dry-run`
+   (`WORDPRESS_DRY_RUN` 기본값이 이미 `true`라 `--dry-run` 없이 `--publish`만
+   줘도 여전히 dry-run으로 동작합니다.)
+3. **그다음에만 실제 draft 생성**: `.env`는 그대로 두고(`WORDPRESS_DRAFT_FIRST=true`
+   유지) `python main.py --topic "테스트" --publish` — 품질 검사를 통과해도
+   WordPress에는 draft로만 만들어집니다. 운영자가 `.env`에서
+   `WORDPRESS_DRAFT_FIRST=false`로 의도적으로 바꾸기 전에는 자동 공개
+   발행되지 않습니다.
 
 ## 다음 구현 단계
 
@@ -156,9 +176,9 @@ pytest
    `clients/llm_client.LlmClient.generate()` 호출로 교체 (wordpress_writer와
    동일한 패턴: MasterContent만 근거로 삼고, LLM 응답은 구조화된 스키마로
    검증한 뒤에만 반영)
-2. `clients/wordpress_client.py` + `modules/wordpress_publisher` —
-   WordPress REST API 실제 연동
-3. `clients/search_console_client.py` + `modules/performance_tracker`
+2. `clients/search_console_client.py` + `modules/performance_tracker`
    — Google Search Console 연동
+3. Evergreen 페이지 업데이트(기존 published 글 자동 갱신) 정책 —
+   이번 단계에서는 의도적으로 만들지 않음
 
 각 단계의 상세한 작업 원칙과 설계 규칙은 `CLAUDE.md`를 참고하세요.
