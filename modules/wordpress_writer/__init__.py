@@ -1,4 +1,10 @@
+from .fact_validation import (
+    FactValidationResult,
+    FactValidationStatus,
+    validate_fact_grounding,
+)
 from .generator import (
+    FactGroundingError,
     HallucinationDetectedError,
     WordPressGenerationError,
     generate_wordpress_content,
@@ -11,5 +17,9 @@ __all__ = [
     "WordPressArticle",
     "WordPressGenerationError",
     "HallucinationDetectedError",
+    "FactGroundingError",
+    "FactValidationResult",
+    "FactValidationStatus",
+    "validate_fact_grounding",
     "markdown_to_html",
 ]

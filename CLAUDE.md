@@ -61,7 +61,7 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
 | `modules/master_content/schema.py` | Master Content JSON의 pydantic 스키마 정의 (가장 먼저 봐야 할 파일) |
 | `modules/master_content/builder.py` | MasterContent 생성/저장/로드 |
 | `modules/data_ingest/` | 1단계: 원본 데이터 → `MarketData` 변환 |
-| `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움. Anthropic Claude 실제 연동, `models.py`(WordPressArticle), `markdown_html.py`(안전한 마크다운→HTML 변환) 포함 |
+| `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움. Anthropic Claude 실제 연동, `models.py`(WordPressArticle), `markdown_html.py`(안전한 마크다운→HTML 변환), `fact_validation.py`(Fact ID·숫자/날짜 근거 검증) 포함 |
 | `modules/quality_check/` | 4단계: seo/aeo/geo/neo 개별 checker + 통합 `checker.py` |
 | `modules/wordpress_publisher/` | 5단계: 발행 (현재 미구현, `clients/wordpress_client.py` 완성 후 연결) |
 | `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
@@ -108,6 +108,26 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       `llm_client`를 주입할 수 있어 테스트가 실제 API를 부르지 않는다.
       테스트: `tests/test_wordpress_writer.py`, 공용 fixture는
       `tests/conftest.py`의 `FakeLlmClient`/`fake_llm_client`.
+- [x] **Fact Grounding 강화** (`modules/wordpress_writer/fact_validation.py`).
+      `Fact`에 `id` 필드 추가(직접 안 정할 경우 `Analysis`가 순서대로
+      "fact_001"처럼 자동 채번, `Analysis._assign_fact_ids`). LLM은
+      `WordPressArticle.used_fact_ids`로 근거 fact id를 함께 반환하고,
+      시스템은 이를 그대로 신뢰하지 않고 `validate_fact_grounding()`으로
+      검증한다: 존재하지 않는 fact id, 퍼센트/bp/억·조·billion 등
+      규모 표현/날짜(ISO, "YYYY년 M월 D일", 연도 없는 "M월 D일")를
+      MasterContent와 대조 → `FactValidationResult(status=PASS|
+      REVIEW_REQUIRED|FAIL, used_fact_ids, invalid_fact_ids,
+      unsupported_claims, unsupported_numbers, warnings)`. FAIL은
+      `FactGroundingError`로 막아 `content.wordpress`에 반영되지 않고,
+      REVIEW_REQUIRED(예: confidence=low fact 사용, used_fact_ids가
+      비었는데 본문에 구체적 수치가 있음)는 막지 않지만
+      `WordPressContent.fact_validation_status/warnings`(신규 additive
+      필드)에 남겨 향후 draft 게이트에 쓸 수 있게 해 둔다. 목록/heading
+      번호("1.", "##")는 검사 전에 줄 앞에서 제거해 사실 숫자로 오인하지
+      않는다. `source_list`도 검증된 `used_fact_ids`가 있으면 그 fact의
+      source를 최우선으로 쓰도록 `_build_source_list`를 확장했다(없으면
+      기존처럼 analysis.sources 전체 → 모든 fact.source 순으로 폴백).
+      테스트: `tests/test_fact_validation.py` (14개).
 - [x] 기본 테스트 스위트
 
 다음에 할 일 (권장 순서):

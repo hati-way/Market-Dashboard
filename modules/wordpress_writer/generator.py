@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from clients.llm_client import LlmClient
 from modules.master_content.schema import MasterContent, SeoMeta, WordPressContent
 
+from .fact_validation import FactValidationResult, FactValidationStatus, validate_fact_grounding
 from .markdown_html import markdown_to_html
 from .models import WordPressArticle
 
@@ -36,7 +37,27 @@ class WordPressGenerationError(Exception):
 
 
 class HallucinationDetectedError(WordPressGenerationError):
-    """MasterContent에 없는 수치가 생성된 본문에 포함된 경우 발생한다."""
+    """MasterContent에 없는 수치가 생성된 본문에 포함된 경우 발생한다.
+
+    본문 안 소수점 숫자를 MasterContent 값과 단순 대조하는 최소한의
+    검사다(_check_for_hallucinated_numbers). 퍼센트/bp/금액/날짜와 Fact ID
+    까지 구조적으로 대조하는 더 엄격한 검사는 FactGroundingError를 본다.
+    """
+
+
+class FactGroundingError(WordPressGenerationError):
+    """Fact Grounding 검증(fact_validation.validate_fact_grounding)이
+    FAIL 판정을 내렸을 때 발생한다. result에 상세 사유가 담겨 있다.
+    """
+
+    def __init__(self, result: FactValidationResult) -> None:
+        self.result = result
+        parts = ["Fact Grounding 검증 실패(FAIL)."]
+        if result.invalid_fact_ids:
+            parts.append(f"존재하지 않는 Fact ID: {result.invalid_fact_ids}")
+        if result.unsupported_numbers:
+            parts.append(f"근거 없는 수치/날짜: {result.unsupported_numbers}")
+        super().__init__(" ".join(parts))
 
 
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
@@ -81,6 +102,12 @@ content_markdown은 마크다운으로 작성한다. 아래 순서를 기본 구
 13. 핵심 요약
 글 제목(H1)과 출처 목록은 만들지 않는다 (시스템이 별도로 처리한다).
 
+[Fact 인용]
+사용자 메시지의 MasterContent.analysis.facts 각 항목에는 id가 있다
+(예: "fact_001"). 본문에서 구체적인 수치/날짜/주장의 근거로 사용한
+fact의 id를 모두 used_fact_ids 배열에 넣는다. 사용하지 않은 fact의
+id는 넣지 않는다. facts 목록에 없는 id를 지어내지 않는다.
+
 [출력 형식]
 다른 설명, 코드펜스, 부가 텍스트 없이 아래 키를 가진 JSON 객체 하나만
 출력한다. content_html, source_list, generated_at 키는 포함하지 않는다
@@ -93,7 +120,8 @@ content_markdown은 마크다운으로 작성한다. 아래 순서를 기본 구
   "meta_description": string,
   "content_markdown": string,
   "primary_keyword": string,
-  "related_keywords": string[]
+  "related_keywords": string[],
+  "used_fact_ids": string[]
 }
 """
 
@@ -198,26 +226,37 @@ def _check_for_hallucinated_numbers(article: WordPressArticle, content: MasterCo
         )
 
 
-def _build_source_list(content: MasterContent) -> list[str]:
+def _build_source_list(content: MasterContent, used_fact_ids: list[str] | None = None) -> list[str]:
     """LLM이 아니라 MasterContent.analysis에서 직접 만든 출처 목록.
 
     LLM이 출처를 지어내는 것을 막기 위해, source_list는 항상 이
-    함수의 결과로 덮어쓴다.
+    함수의 결과로 덮어쓴다. used_fact_ids(검증을 통과한 것만)가 있으면
+    실제로 본문 작성에 쓰인 fact의 source를 최우선으로 사용하고,
+    없으면 기존처럼 analysis.sources 전체, 그마저도 없으면 모든
+    fact의 source로 대체한다.
     """
     entries: list[str] = []
     seen: set[str] = set()
 
-    for source in content.analysis.sources:
-        label = f"{source.name} ({source.url})" if source.url else source.name
-        if label not in seen:
+    def add(label: str | None) -> None:
+        if label and label not in seen:
             seen.add(label)
             entries.append(label)
 
+    if used_fact_ids:
+        fact_by_id = {fact.id: fact for fact in content.analysis.facts if fact.id}
+        for fact_id in used_fact_ids:
+            fact = fact_by_id.get(fact_id)
+            if fact:
+                add(fact.source)
+
+    if not entries:
+        for source in content.analysis.sources:
+            add(f"{source.name} ({source.url})" if source.url else source.name)
+
     if not entries:
         for fact in content.analysis.facts:
-            if fact.source and fact.source not in seen:
-                seen.add(fact.source)
-                entries.append(fact.source)
+            add(fact.source)
 
     return entries
 
@@ -249,12 +288,22 @@ def generate_wordpress_content(
     data = _parse_llm_response(raw_response)
     article = _build_article(data)
 
-    # source_list는 LLM 응답에 있어도 무시하고 MasterContent 기반으로 다시 만든다.
-    article.source_list = _build_source_list(content)
-
-    # 잘못된(근거 없는 수치가 섞인) 글은 여기서 걸러내고, 아래의
-    # content.wordpress 반영까지 진행하지 않는다.
+    # 1차 방어선(기존, 유지): 본문의 소수점 숫자가 MasterContent에 있는지
+    # 최소한으로 대조한다. 여기서 걸리면 아래 content.wordpress 반영까지
+    # 진행하지 않는다.
     _check_for_hallucinated_numbers(article, content)
+
+    # 2차 방어선(신규): Fact ID + 퍼센트/bp/금액/날짜를 구조적으로 대조한다.
+    # FAIL이면 역시 content.wordpress 를 반영하지 않고 예외로 막는다.
+    # REVIEW_REQUIRED는 막지 않고 결과를 wordpress 필드에 남겨 향후
+    # (자동 발행하지 않는) draft 판단에 쓸 수 있게 한다.
+    fact_result = validate_fact_grounding(article, content)
+    if fact_result.status == FactValidationStatus.FAIL:
+        raise FactGroundingError(fact_result)
+
+    # source_list는 LLM 응답을 무시하고, 검증된 used_fact_ids가 있으면
+    # 실제로 쓰인 fact의 source를 우선해 MasterContent 기반으로 다시 만든다.
+    article.source_list = _build_source_list(content, used_fact_ids=fact_result.used_fact_ids)
 
     body_html = markdown_to_html(article.content_markdown)
     sources_html = _render_sources_html(article.source_list)
@@ -269,6 +318,8 @@ def generate_wordpress_content(
         tags=article.related_keywords,
         categories=[],
         source_list=article.source_list,
+        fact_validation_status=fact_result.status.value,
+        fact_validation_warnings=fact_result.warnings,
         seo=SeoMeta(
             meta_title=article.title,
             meta_description=article.meta_description,

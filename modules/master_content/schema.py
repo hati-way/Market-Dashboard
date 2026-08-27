@@ -26,7 +26,7 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _now_iso() -> str:
@@ -99,8 +99,15 @@ class Fact(BaseModel):
     모든 fact는 근거(source)가 있는 핵심 사실로 취급한다. 따라서 claim과
     source는 필수값이며, source_type/confidence 는 정해진 값(Enum)만
     허용한다.
+
+    id는 이 fact를 다른 곳(예: WordPressArticle.used_fact_ids)에서
+    참조하기 위한 식별자다. 직접 지정하지 않으면 빈 문자열로 남아 있다가,
+    Analysis에 담길 때 "fact_001"처럼 순서대로 자동 채워진다
+    (Analysis._assign_fact_ids 참고). Fact를 Analysis 밖에서 단독으로
+    만들 때는 자동 채번이 일어나지 않는다.
     """
 
+    id: str = ""
     claim: str
     value: str | float | None = None
     unit: str | None = None
@@ -137,6 +144,27 @@ class Analysis(BaseModel):
     update_triggers: list[str] = Field(default_factory=list)
     confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
 
+    @model_validator(mode="after")
+    def _assign_fact_ids(self) -> "Analysis":
+        """id가 비어 있는 fact에 "fact_001"처럼 순서대로 안정적인 id를 채운다.
+
+        이미 id가 지정된 fact는 건드리지 않고, 그 id와 충돌하는 번호는
+        건너뛴다. 기존에 id 없이 만들어진 데이터와도 호환된다(그냥
+        새로 채번될 뿐 에러가 나지 않는다).
+        """
+        used_ids = {fact.id for fact in self.facts if fact.id}
+        next_seq = 1
+        for fact in self.facts:
+            if fact.id:
+                continue
+            while f"fact_{next_seq:03d}" in used_ids:
+                next_seq += 1
+            new_id = f"fact_{next_seq:03d}"
+            fact.id = new_id
+            used_ids.add(new_id)
+            next_seq += 1
+        return self
+
 
 class SeoMeta(BaseModel):
     meta_title: str = ""
@@ -155,6 +183,13 @@ class WordPressContent(BaseModel):
     tags: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     source_list: list[str] = Field(default_factory=list)
+    # Fact Grounding 검증 결과(modules.wordpress_writer.fact_validation) 중
+    # 발행 여부 판단에 쓸 수 있는 최소 정보만 옮겨 담는다. FAIL은 여기까지
+    # 오지 못하므로("" 인 경우는 검증 전이거나 과거 데이터), 실제로는
+    # "PASS" 또는 "REVIEW_REQUIRED"만 들어온다. 이 값으로 자동 발행을
+    # 막는 실제 게이트(quality gate)는 이번 단계에서 구현하지 않는다.
+    fact_validation_status: str = ""
+    fact_validation_warnings: list[str] = Field(default_factory=list)
     seo: SeoMeta = Field(default_factory=SeoMeta)
 
 

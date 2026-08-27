@@ -141,7 +141,7 @@ pytest
 |---|---|
 | 1. 데이터 입력 | ✅ JSON 파일 기반으로 동작 |
 | 2. Master JSON 구조화 | ✅ 동작 (`analysis` 필드: primary_question/facts/sources/bull·bear case 등 포함) |
-| 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + 환각 방지 검사 포함) |
+| 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + Fact Grounding 검증 포함) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |
 | 5. WordPress 발행 | ❌ 미구현 (`NotImplementedError`) |
 | 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동, wordpress 결과만 재사용) |

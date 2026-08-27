@@ -28,6 +28,12 @@ class WordPressArticle(BaseModel):
     primary_keyword: str
     related_keywords: list[str] = Field(default_factory=list)
 
+    # LLM이 본문 작성에 근거로 사용한 MasterContent.analysis.facts의 id 목록
+    # (예: ["fact_001", "fact_003"]). LLM이 보낸 값 그대로를 신뢰하지 않고,
+    # fact_validation.validate_fact_grounding()이 실제 존재하는 id인지
+    # 검증한 뒤에만 사용한다.
+    used_fact_ids: list[str] = Field(default_factory=list)
+
     # 아래 두 필드는 LLM 응답에 값이 있어도 무시되고, 시스템이 직접 채운다.
     content_html: str = ""
     source_list: list[str] = Field(default_factory=list)
