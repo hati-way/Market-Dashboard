@@ -147,6 +147,7 @@ pytest
 | 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동, wordpress 결과만 재사용) |
 | 10. 성과 기록 | ❌ 미구현 |
 | LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 (wordpress_writer 에서 사용 중) |
+| Quality Gate (`modules/quality_gate/`) | ✅ fact/seo/aeo/geo/neo 점수 + PASS/REVIEW_REQUIRED/FAIL + 발행 여부 결정. 독립 모듈이며 아직 파이프라인에 자동 연결되지는 않음 |
 
 ## 다음 구현 단계
 
