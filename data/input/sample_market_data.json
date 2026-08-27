@@ -1,0 +1,24 @@
+{
+  "as_of_date": "2026-08-26",
+  "indices": [
+    {"name": "S&P 500", "value": 5650.12, "change_percent": 0.42, "unit": "pt"},
+    {"name": "KOSPI", "value": 2780.55, "change_percent": -0.18, "unit": "pt"}
+  ],
+  "fx": [
+    {"name": "USD/KRW", "value": 1385.5, "change_percent": 0.05, "unit": "KRW"}
+  ],
+  "commodities": [
+    {"name": "WTI 원유", "value": 78.3, "change_percent": 1.1, "unit": "USD/bbl"}
+  ],
+  "macro_events": [
+    {
+      "name": "미국 근원 PCE 물가지수",
+      "date": "2026-08-29",
+      "forecast": "2.6%",
+      "previous": "2.7%",
+      "importance": "high"
+    }
+  ],
+  "notes": "샘플 데이터입니다. 실제 데이터로 교체해서 사용하세요.",
+  "raw_source": {}
+}

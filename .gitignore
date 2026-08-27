@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+.env
+
+# 생성되는 콘텐츠(민감/대용량일 수 있으므로 기본적으로 커밋하지 않음)
+data/master/*
+!data/master/.gitkeep
+data/output/*
+!data/output/.gitkeep
+
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.DS_Store

@@ -1,0 +1,136 @@
+# CLAUDE.md
+
+이 문서는 Claude Code(또는 다른 AI 코딩 에이전트)가 이 저장소에서
+작업할 때 지켜야 할 아키텍처 규칙과 구현 순서를 정리한 것입니다.
+
+## 프로젝트 개요
+
+"돈맥 콘텐츠 자동화 시스템"은 금융/거시경제 데이터를 입력받아 하나의
+Master Content JSON으로 구조화하고, 이를 기반으로 WordPress 분석글,
+Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬프트를
+자동 생성하는 파이프라인입니다. 발행은 SEO/AEO/GEO/NEO 품질 검사를
+통과한 콘텐츠에 한해서만 이루어집니다.
+
+전체 흐름은 `README.md`의 "전체 흐름 (10단계)" 표를 참고하세요.
+
+## 핵심 설계 원칙
+
+1. **단일 데이터 구조(Single Source of Truth)**
+   모든 모듈은 `modules/master_content/schema.py`의 `MasterContent`
+   객체 하나를 입력받고, 자기 담당 필드만 채운 뒤 그대로 반환한다.
+   함수 시그니처는 항상 `def do_something(content: MasterContent) -> MasterContent`
+   형태를 유지한다. 이렇게 해야:
+   - 각 모듈을 다른 모듈 없이 독립적으로 테스트할 수 있고
+   - `pipeline/orchestrator.py`에서 단계를 자유롭게 추가/제거/순서
+     변경할 수 있다.
+
+2. **모듈 = 폴더 단위 독립 단위**
+   `modules/<단계이름>/` 각각은 다른 `modules/*` 패키지에 의존하지
+   않는다 (오직 `modules/master_content`의 스키마 타입만 가져다
+   쓴다). 한 모듈을 통째로 삭제해도 다른 모듈이 깨지지 않아야 한다.
+
+3. **외부 API 접근은 항상 `clients/`를 통해서만**
+   WordPress, LLM(OpenAI/Anthropic), Search Console, Threads 등
+   외부 서비스 호출 코드는 `clients/*_client.py`에만 존재한다.
+   `modules/*`는 이 클라이언트를 가져다 쓰기만 하고, `requests`나
+   SDK를 직접 import 하지 않는다. → 나중에 공급자를 바꾸거나
+   모킹(mock)해서 테스트하기 쉬워진다.
+
+4. **비밀값은 오직 `config/settings.py`를 통해서만 읽는다**
+   - API 키, 비밀번호, URL 등 민감한 값은 **절대 코드에 하드코딩하지
+     않는다.**
+   - 모든 값은 `.env` 파일 → `config/settings.get_settings()` 를
+     거쳐서만 읽는다.
+   - 새 환경변수가 필요하면 반드시: `.env.example`에 키 추가 →
+     `config/settings.py`의 `Settings` 데이터클래스에 필드 추가 →
+     `get_settings()`에서 로드. 이 세 곳을 항상 함께 수정한다.
+   - `.env` 파일 자체는 git에 커밋하지 않는다 (`.gitignore`에 등록됨).
+
+5. **바로 실사용 기능을 완성하려 하지 않는다**
+   이 저장소는 단계적으로 구현한다. 아직 구현되지 않은 외부 연동은
+   `NotImplementedError`를 던지는 명확한 stub으로 남겨두고, 함수
+   시그니처와 반환 타입만 먼저 확정한다. 새 기능을 구현할 때도
+   가능하면 먼저 인터페이스(입출력 타입)를 정하고, 그 다음에 내부
+   로직을 채운다.
+
+## 폴더별 역할
+
+| 경로 | 역할 |
+|---|---|
+| `config/settings.py` | `.env` 로드 + 전역 설정 (모든 비밀값의 유일한 출처) |
+| `modules/master_content/schema.py` | Master Content JSON의 pydantic 스키마 정의 (가장 먼저 봐야 할 파일) |
+| `modules/master_content/builder.py` | MasterContent 생성/저장/로드 |
+| `modules/data_ingest/` | 1단계: 원본 데이터 → `MarketData` 변환 |
+| `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움 |
+| `modules/quality_check/` | 4단계: seo/aeo/geo/neo 개별 checker + 통합 `checker.py` |
+| `modules/wordpress_publisher/` | 5단계: 발행 (현재 미구현, `clients/wordpress_client.py` 완성 후 연결) |
+| `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
+| `modules/performance_tracker/` | 10단계: 성과 기록 (현재 미구현) |
+| `clients/` | 외부 API 클라이언트 (현재 모두 stub) |
+| `pipeline/orchestrator.py` | 전체 단계를 순서대로 실행하는 오케스트레이터 |
+| `main.py` | CLI 진입점 |
+| `tests/` | 모듈별 + 파이프라인 전체 테스트 |
+
+## 구현 순서 (로드맵)
+
+이미 완료됨 (뼈대):
+- [x] Master Content JSON 스키마 (`modules/master_content/schema.py`)
+- [x] 1~4단계 + 6~9단계 placeholder 구현 (LLM 없이도 파이프라인 전체가 동작)
+- [x] SEO/AEO/GEO/NEO 규칙 기반 품질 검사
+- [x] `pipeline/orchestrator.py`, `main.py`
+- [x] 기본 테스트 스위트
+
+다음에 할 일 (권장 순서):
+
+1. **LLM 클라이언트 연동** — `clients/llm_client.py`
+   - OpenAI 또는 Anthropic 중 하나를 우선 연동 (둘 다 지원하려면
+     공통 인터페이스 `generate_text(prompt, system_prompt)` 유지)
+   - API 키는 `config/settings.py`에서만 읽기
+2. **콘텐츠 생성 모듈을 LLM 기반으로 교체**
+   - `modules/wordpress_writer/generator.py`의 `_build_placeholder_html`
+     를 LLM 호출로 교체
+   - 같은 방식으로 `threads_writer`, `notebooklm_script`,
+     `youtube_meta`, `thumbnail_prompt`도 교체
+   - 각 모듈의 함수 시그니처는 바꾸지 않는다 (`MasterContent -> MasterContent`)
+3. **품질 검사 고도화**
+   - 지금은 규칙 기반(길이, 키워드 포함 여부)만 있음
+   - 필요하면 LLM을 이용한 정성적 평가를 추가 (예: AEO 검사에서
+     "이 글이 질문에 직접 답하는가"를 LLM에게 판단시키기)
+   - NEO 기준은 아직 가정 단계이므로, 실제 기준이 정해지면
+     `modules/quality_check/neo_checker.py`만 수정하면 됨
+4. **WordPress 발행 연동** — `clients/wordpress_client.py` +
+   `modules/wordpress_publisher/publisher.py`
+   - WordPress REST API (`/wp-json/wp/v2/posts`)를 Application
+     Password 인증으로 호출
+   - `publish_to_wordpress()`가 `NotImplementedError` 대신 실제
+     `PublishResult`를 반환하도록 완성
+5. **Search Console 연동** — `clients/search_console_client.py` +
+   `modules/performance_tracker/tracker.py`
+   - 발행된 글의 URL을 기준으로 성과 데이터를 주기적으로 수집해
+     `MasterContent.performance`에 append
+6. **Threads API 연동** (선택) — 지금은 텍스트만 생성하고 실제
+   게시는 하지 않음. 필요 시 `clients/threads_client.py`를 새로
+   추가하고 동일한 패턴을 따른다.
+
+## 새 외부 연동을 추가할 때 체크리스트
+
+1. `clients/<service>_client.py` 에 클라이언트 클래스 추가 (생성자에서
+   `config.settings.get_settings()`로 필요한 값만 읽기)
+2. 필요한 환경변수를 `.env.example`과 `config/settings.py`에 추가
+3. 해당 클라이언트를 사용하는 `modules/*` 함수는 여전히
+   `MasterContent -> MasterContent` 시그니처 유지
+4. 외부 API를 직접 호출하지 않는 단위 테스트를 `tests/`에 추가
+   (클라이언트는 모킹하거나, 클라이언트 호출 이전 로직만 테스트)
+5. `README.md`의 "지금 할 수 있는 것 / 아직 안 되는 것" 표 갱신
+
+## 테스트
+
+```bash
+pytest
+```
+
+- 새 모듈을 추가하면 그 모듈만 단독으로 테스트하는 파일을
+  `tests/test_<module>.py`로 추가한다 (다른 모듈에 의존하지 않는
+  최소 입력으로).
+- `pipeline/orchestrator.py`를 바꿀 때는 `tests/test_pipeline.py`의
+  end-to-end 테스트가 여전히 통과하는지 확인한다.
