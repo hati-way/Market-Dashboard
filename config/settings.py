@@ -25,6 +25,7 @@ class Settings:
 
     openai_api_key: str | None
     anthropic_api_key: str | None
+    anthropic_model: str
 
     google_search_console_credentials_path: str | None
     google_search_console_site_url: str | None
@@ -43,6 +44,7 @@ def get_settings() -> Settings:
         wordpress_app_password=os.getenv("WORDPRESS_APP_PASSWORD") or None,
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         anthropic_api_key=os.getenv("ANTHROPIC_API_KEY") or None,
+        anthropic_model=os.getenv("ANTHROPIC_MODEL") or "claude-sonnet-5",
         google_search_console_credentials_path=os.getenv(
             "GOOGLE_SEARCH_CONSOLE_CREDENTIALS_PATH"
         )

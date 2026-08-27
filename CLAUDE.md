@@ -66,32 +66,45 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
 | `modules/wordpress_publisher/` | 5단계: 발행 (현재 미구현, `clients/wordpress_client.py` 완성 후 연결) |
 | `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
 | `modules/performance_tracker/` | 10단계: 성과 기록 (현재 미구현) |
-| `clients/` | 외부 API 클라이언트 (현재 모두 stub) |
+| `clients/` | 외부 API 클라이언트 (`llm_client.py`는 Anthropic 연동 완료, 나머지는 stub) |
 | `pipeline/orchestrator.py` | 전체 단계를 순서대로 실행하는 오케스트레이터 |
 | `main.py` | CLI 진입점 |
 | `tests/` | 모듈별 + 파이프라인 전체 테스트 |
 
 ## 구현 순서 (로드맵)
 
-이미 완료됨 (뼈대):
+이미 완료됨:
 - [x] Master Content JSON 스키마 (`modules/master_content/schema.py`)
+- [x] `analysis` 섹션 (`Fact`/`Source`/`Analysis`): primary_question,
+      summary, facts, sources, causal_chain, market_implications,
+      bull_case, bear_case, risks, invalidating_conditions,
+      update_triggers, confidence. `Fact`는 claim/source 필수, 날짜는
+      ISO 형식만 허용, source_type/confidence는 Enum으로 값 제한
+      (`tests/test_master_content_validation.py`)
 - [x] 1~4단계 + 6~9단계 placeholder 구현 (LLM 없이도 파이프라인 전체가 동작)
 - [x] SEO/AEO/GEO/NEO 규칙 기반 품질 검사
 - [x] `pipeline/orchestrator.py`, `main.py`
+- [x] LLM 클라이언트 (`clients/llm_client.py`, Anthropic Claude 연동,
+      `generate(user_prompt, system_prompt=None, temperature=..., max_tokens=..., timeout=...)`
+      단일 인터페이스, `LlmConfigError`/`LlmRetryableError`/`LlmFatalError`
+      구분, mocking 테스트 `tests/test_llm_client.py`)
 - [x] 기본 테스트 스위트
 
 다음에 할 일 (권장 순서):
 
-1. **LLM 클라이언트 연동** — `clients/llm_client.py`
-   - OpenAI 또는 Anthropic 중 하나를 우선 연동 (둘 다 지원하려면
-     공통 인터페이스 `generate_text(prompt, system_prompt)` 유지)
-   - API 키는 `config/settings.py`에서만 읽기
-2. **콘텐츠 생성 모듈을 LLM 기반으로 교체**
+1. **콘텐츠 생성 모듈을 LLM 기반으로 교체**
    - `modules/wordpress_writer/generator.py`의 `_build_placeholder_html`
-     를 LLM 호출로 교체
+     를 `clients/llm_client.LlmClient.generate()` 호출로 교체
    - 같은 방식으로 `threads_writer`, `notebooklm_script`,
      `youtube_meta`, `thumbnail_prompt`도 교체
    - 각 모듈의 함수 시그니처는 바꾸지 않는다 (`MasterContent -> MasterContent`)
+   - 이때 `MasterContent.analysis`(facts/sources/bull_case/bear_case 등)를
+     프롬프트의 근거로 사용하도록 연결한다
+2. **`modules/analysis` (또는 유사한) 모듈 추가 검토**
+   - 지금은 `analysis` 필드가 스키마에만 존재하고 이를 채우는 전용
+     모듈은 아직 없다. market_data → analysis 를 채우는 단계를
+     LLM 기반으로 새로 만들지, 3단계(wordpress_writer) 이전에 별도
+     단계로 둘지 결정 필요
 3. **품질 검사 고도화**
    - 지금은 규칙 기반(길이, 키워드 포함 여부)만 있음
    - 필요하면 LLM을 이용한 정성적 평가를 추가 (예: AEO 검사에서

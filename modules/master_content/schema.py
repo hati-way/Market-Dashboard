@@ -5,6 +5,9 @@
 
     market_data 입력
         -> MasterContent 생성 (market_data 채움)
+        -> analysis 채움 (primary_question/summary/facts/sources 등,
+           WordPress/Threads/NotebookLM/YouTube 콘텐츠가 공통으로 참조하는
+           단일 분석 원본)
         -> wordpress_writer 가 wordpress 필드를 채움
         -> quality_check 가 quality_check 필드를 채움
         -> (통과 시) wordpress_publisher 가 발행 후 published 필드를 채움
@@ -17,6 +20,7 @@
 """
 from __future__ import annotations
 
+from datetime import date as date_type
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
@@ -34,6 +38,18 @@ class ContentStatus(str, Enum):
     QUALITY_CHECKED = "quality_checked"  # 품질 검사 통과
     QUALITY_FAILED = "quality_failed"    # 품질 검사 미통과
     PUBLISHED = "published"        # WordPress 발행 완료
+
+
+class SourceType(str, Enum):
+    PRIMARY = "primary"      # 1차 출처 (공식 발표, 원자료 등)
+    SECONDARY = "secondary"  # 2차 출처 (기사, 리포트 등 1차 출처를 인용/가공한 자료)
+    UNKNOWN = "unknown"      # 출처 신뢰도를 아직 분류하지 않음
+
+
+class ConfidenceLevel(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
 
 
 class Meta(BaseModel):
@@ -75,6 +91,51 @@ class MarketData(BaseModel):
     macro_events: list[MacroEvent] = Field(default_factory=list)
     notes: str = ""
     raw_source: dict[str, Any] = Field(default_factory=dict)
+
+
+class Fact(BaseModel):
+    """분석의 근거가 되는 개별 사실/수치.
+
+    모든 fact는 근거(source)가 있는 핵심 사실로 취급한다. 따라서 claim과
+    source는 필수값이며, source_type/confidence 는 정해진 값(Enum)만
+    허용한다.
+    """
+
+    claim: str
+    value: str | float | None = None
+    unit: str | None = None
+    date: date_type | None = None
+    source: str
+    source_type: SourceType = SourceType.UNKNOWN
+    confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
+
+
+class Source(BaseModel):
+    """분석 전반에서 참조한 출처."""
+
+    name: str
+    url: str | None = None
+    source_type: SourceType = SourceType.UNKNOWN
+
+
+class Analysis(BaseModel):
+    """2단계: WordPress/Threads/NotebookLM/YouTube 콘텐츠가 공유하는
+    분석의 원본(단일 출처). market_data(원본 시세/이벤트)를 근거로
+    사람 또는 LLM이 정리한 해석 결과를 담는다.
+    """
+
+    primary_question: str = ""
+    summary: str = ""
+    facts: list[Fact] = Field(default_factory=list)
+    sources: list[Source] = Field(default_factory=list)
+    causal_chain: list[str] = Field(default_factory=list)
+    market_implications: list[str] = Field(default_factory=list)
+    bull_case: list[str] = Field(default_factory=list)
+    bear_case: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    invalidating_conditions: list[str] = Field(default_factory=list)
+    update_triggers: list[str] = Field(default_factory=list)
+    confidence: ConfidenceLevel = ConfidenceLevel.MEDIUM
 
 
 class SeoMeta(BaseModel):
@@ -173,6 +234,7 @@ class MasterContent(BaseModel):
 
     meta: Meta = Field(default_factory=Meta)
     market_data: MarketData = Field(default_factory=MarketData)
+    analysis: Analysis = Field(default_factory=Analysis)
     wordpress: WordPressContent = Field(default_factory=WordPressContent)
     quality_check: QualityCheck = Field(default_factory=QualityCheck)
     publish: PublishResult = Field(default_factory=PublishResult)

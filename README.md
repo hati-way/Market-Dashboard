@@ -105,9 +105,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-`.env` 파일을 열어서 실제로 가지고 있는 값만 채워 넣으세요. 아직
-아무 API도 연동하지 않았으므로 지금 당장은 비워둬도 파이프라인은
-동작합니다 (WordPress 발행/LLM 생성 단계만 비활성 상태로 동작).
+`.env` 파일을 열어서 실제로 가지고 있는 값만 채워 넣으세요. 지금
+당장은 비워둬도 파이프라인 자체는 동작합니다 (WordPress 발행은 아직
+미구현이고, 콘텐츠 생성 모듈들도 아직 LLM을 호출하지 않기 때문). 다만
+`clients/llm_client.py`(Anthropic Claude)를 직접 사용해보려면
+`ANTHROPIC_API_KEY`를 채워야 합니다.
 
 ### 5. 파이프라인 실행
 
@@ -138,22 +140,22 @@ pytest
 | 단계 | 상태 |
 |---|---|
 | 1. 데이터 입력 | ✅ JSON 파일 기반으로 동작 |
-| 2. Master JSON 구조화 | ✅ 동작 |
-| 3. WordPress 글 생성 | ⚠️ 템플릿 기반 placeholder (LLM 미연동) |
+| 2. Master JSON 구조화 | ✅ 동작 (`analysis` 필드: primary_question/facts/sources/bull·bear case 등 포함) |
+| 3. WordPress 글 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |
 | 5. WordPress 발행 | ❌ 미구현 (`NotImplementedError`) |
-| 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (LLM 미연동) |
+| 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동) |
 | 10. 성과 기록 | ❌ 미구현 |
+| LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 완료 (생성 모듈에서 아직 사용은 안 함) |
 
 ## 다음 구현 단계
 
-1. `clients/llm_client.py` — OpenAI/Anthropic 중 하나를 실제로 연동
-2. `modules/wordpress_writer`, `threads_writer`, `notebooklm_script`,
+1. `modules/wordpress_writer`, `threads_writer`, `notebooklm_script`,
    `youtube_meta`, `thumbnail_prompt` — placeholder 로직을
-   `llm_client` 호출로 교체
-3. `clients/wordpress_client.py` + `modules/wordpress_publisher` —
+   `clients/llm_client.LlmClient.generate()` 호출로 교체
+2. `clients/wordpress_client.py` + `modules/wordpress_publisher` —
    WordPress REST API 실제 연동
-4. `clients/search_console_client.py` + `modules/performance_tracker`
+3. `clients/search_console_client.py` + `modules/performance_tracker`
    — Google Search Console 연동
 
 각 단계의 상세한 작업 원칙과 설계 규칙은 `CLAUDE.md`를 참고하세요.
