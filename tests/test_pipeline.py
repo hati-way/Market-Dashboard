@@ -4,8 +4,12 @@ from pipeline.orchestrator import run_pipeline
 SAMPLE_INPUT = "data/input/sample_market_data.json"
 
 
-def test_run_pipeline_end_to_end():
-    content = run_pipeline(topic="파이프라인 통합 테스트", market_data_path=SAMPLE_INPUT)
+def test_run_pipeline_end_to_end(fake_llm_client):
+    content = run_pipeline(
+        topic="파이프라인 통합 테스트",
+        market_data_path=SAMPLE_INPUT,
+        llm_client=fake_llm_client,
+    )
 
     assert content.wordpress.content_html
     assert content.quality_check.checked_at is not None

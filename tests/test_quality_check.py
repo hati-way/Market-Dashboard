@@ -6,10 +6,10 @@ from modules.wordpress_writer.generator import generate_wordpress_content
 SAMPLE_INPUT = "data/input/sample_market_data.json"
 
 
-def _build_generated_content():
+def _build_generated_content(fake_llm_client):
     market_data = load_market_data_from_json_file(SAMPLE_INPUT)
     content = build_master_content(topic="미국 증시 브리핑", market_data=market_data)
-    return generate_wordpress_content(content)
+    return generate_wordpress_content(content, llm_client=fake_llm_client)
 
 
 def test_quality_check_fails_on_empty_content():
@@ -22,8 +22,8 @@ def test_quality_check_fails_on_empty_content():
     assert content.quality_check.seo.issues
 
 
-def test_quality_check_runs_all_four_checks():
-    content = _build_generated_content()
+def test_quality_check_runs_all_four_checks(fake_llm_client):
+    content = _build_generated_content(fake_llm_client)
     content = run_quality_check(content)
 
     assert content.quality_check.seo is not None

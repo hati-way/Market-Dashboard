@@ -10,8 +10,11 @@ notebooklm_script, youtube_meta, thumbnail_prompt 등)은 특정 LLM SDK를
 반드시 config.settings.get_settings() 를 통해서만 읽으며, 코드/로그
 어디에도 키 값을 직접 출력하지 않는다.
 
-이번 단계에서는 클라이언트 자체까지만 구현한다. wordpress_writer 등의
-placeholder 로직은 아직 이 클라이언트로 교체하지 않는다.
+기본 모델은 ANTHROPIC_MODEL(기본값 claude-sonnet-5)이다. Sonnet 5는
+temperature/top_p/top_k 같은 비기본 sampling 파라미터를 보내면 API
+오류가 날 수 있으므로, 이 클라이언트는 기본적으로 그런 옵션을 요청에
+넣지 않는다. 모델별로 다른 옵션이 필요해지면 generate()의
+extra_options 로 확장한다.
 """
 from __future__ import annotations
 
@@ -75,15 +78,21 @@ class LlmClient:
         user_prompt: str,
         system_prompt: str | None = None,
         *,
-        temperature: float | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        extra_options: dict[str, object] | None = None,
     ) -> str:
         """user_prompt(+ system_prompt)로 LLM 응답 텍스트를 생성한다.
 
-        temperature 는 설치된 Anthropic SDK 버전의 메시지 API가 별도의
-        typed 파라미터로 노출하지 않는 경우가 있어, extra_body 를 통해
-        요청 본문에 직접 실어 보낸다.
+        Claude Sonnet 5(현재 기본 모델)는 temperature/top_p/top_k 같은
+        비기본 sampling 옵션을 보내면 API 오류가 날 수 있으므로, 기본
+        경로에서는 max_tokens/timeout 외의 어떤 옵션도 요청에 넣지
+        않는다.
+
+        extra_options 는 앞으로 모델별로 다르게 지원되는 생성 옵션
+        (예: 특정 모델의 effort/thinking 설정)을 위한 확장 지점이다.
+        지금은 어떤 모듈도 이 값을 채우지 않으며, 채워지면 그대로
+        extra_body 로 전달된다. Sonnet 5를 쓰는 한 비워 두는 것이 안전하다.
         """
         kwargs: dict[str, object] = {
             "model": self._model,
@@ -93,8 +102,8 @@ class LlmClient:
         }
         if system_prompt:
             kwargs["system"] = system_prompt
-        if temperature is not None:
-            kwargs["extra_body"] = {"temperature": temperature}
+        if extra_options:
+            kwargs["extra_body"] = extra_options
 
         try:
             response = self._client.messages.create(**kwargs)

@@ -74,8 +74,21 @@ def test_generate_success(monkeypatch):
         assert kwargs["system"] == "너는 금융 애널리스트다"
         assert kwargs["messages"] == [{"role": "user", "content": "주제를 요약해줘"}]
 
+        # Claude Sonnet 5는 temperature/top_p/top_k 같은 비기본 sampling
+        # 파라미터를 보내면 오류가 날 수 있으므로 기본 경로에서는 아예
+        # 요청에 포함되지 않아야 한다.
+        assert "temperature" not in kwargs
+        assert "top_p" not in kwargs
+        assert "top_k" not in kwargs
+        assert "extra_body" not in kwargs
 
-def test_generate_passes_temperature_via_extra_body(monkeypatch):
+
+def test_generate_passes_extra_options_via_extra_body(monkeypatch):
+    """모델별로 다른 옵션(예: 향후 effort/thinking)을 위한 확장 지점 테스트.
+
+    기본 경로에서는 아무도 채우지 않지만, 필요할 때 extra_options 로
+    넘긴 값이 그대로 extra_body 로 전달되는지 확인한다.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
 
     with patch("clients.llm_client.anthropic.Anthropic") as mock_anthropic_cls:
@@ -84,10 +97,11 @@ def test_generate_passes_temperature_via_extra_body(monkeypatch):
         mock_anthropic_cls.return_value = mock_client
 
         client = LlmClient()
-        client.generate("hi", temperature=0.3)
+        client.generate("hi", extra_options={"future_option": "value"})
 
         _, kwargs = mock_client.messages.create.call_args
-        assert kwargs["extra_body"] == {"temperature": 0.3}
+        assert kwargs["extra_body"] == {"future_option": "value"}
+        assert "temperature" not in kwargs
 
 
 # ---- 인증정보 없음(잘못된 키로 API가 거부) ----

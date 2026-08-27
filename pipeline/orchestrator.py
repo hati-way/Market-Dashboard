@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from clients.llm_client import LlmClient
 from modules.data_ingest.ingest import load_market_data_from_json_file
 from modules.master_content.builder import build_master_content, save_master_content
 from modules.master_content.schema import MasterContent
@@ -27,7 +28,11 @@ def run_pipeline(
     topic: str,
     market_data_path: str | Path,
     publish: bool = False,
+    llm_client: LlmClient | None = None,
 ) -> MasterContent:
+    """llm_client 를 넘기지 않으면 3단계에서 실제 Anthropic API를 호출하는
+    LlmClient()를 새로 만든다 (테스트에서는 가짜 client를 주입한다).
+    """
     # 1. 데이터 입력
     market_data = load_market_data_from_json_file(market_data_path)
 
@@ -35,7 +40,7 @@ def run_pipeline(
     content = build_master_content(topic=topic, market_data=market_data)
 
     # 3. WordPress 분석글 생성
-    content = generate_wordpress_content(content)
+    content = generate_wordpress_content(content, llm_client=llm_client)
 
     # 4. SEO/AEO/GEO/NEO 품질 검사
     content = run_quality_check(content)

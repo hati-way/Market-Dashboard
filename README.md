@@ -105,11 +105,11 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-`.env` 파일을 열어서 실제로 가지고 있는 값만 채워 넣으세요. 지금
-당장은 비워둬도 파이프라인 자체는 동작합니다 (WordPress 발행은 아직
-미구현이고, 콘텐츠 생성 모듈들도 아직 LLM을 호출하지 않기 때문). 다만
-`clients/llm_client.py`(Anthropic Claude)를 직접 사용해보려면
-`ANTHROPIC_API_KEY`를 채워야 합니다.
+`.env` 파일을 열어서 실제로 가지고 있는 값만 채워 넣으세요.
+`ANTHROPIC_API_KEY`는 3단계(WordPress 글 생성)에서 실제로 사용하므로,
+`python main.py`를 그대로 실행하려면 이 값을 채워야 합니다. (테스트는
+가짜 LLM 응답을 쓰기 때문에 키가 없어도 `pytest`는 그대로 통과합니다.)
+WordPress 발행(5단계)은 아직 미구현이라 관련 값은 비워둬도 됩니다.
 
 ### 5. 파이프라인 실행
 
@@ -141,18 +141,20 @@ pytest
 |---|---|
 | 1. 데이터 입력 | ✅ JSON 파일 기반으로 동작 |
 | 2. Master JSON 구조화 | ✅ 동작 (`analysis` 필드: primary_question/facts/sources/bull·bear case 등 포함) |
-| 3. WordPress 글 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동) |
+| 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + 환각 방지 검사 포함) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |
 | 5. WordPress 발행 | ❌ 미구현 (`NotImplementedError`) |
-| 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동) |
+| 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동, wordpress 결과만 재사용) |
 | 10. 성과 기록 | ❌ 미구현 |
-| LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 완료 (생성 모듈에서 아직 사용은 안 함) |
+| LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 (wordpress_writer 에서 사용 중) |
 
 ## 다음 구현 단계
 
-1. `modules/wordpress_writer`, `threads_writer`, `notebooklm_script`,
-   `youtube_meta`, `thumbnail_prompt` — placeholder 로직을
-   `clients/llm_client.LlmClient.generate()` 호출로 교체
+1. `modules/threads_writer`, `notebooklm_script`, `youtube_meta`,
+   `thumbnail_prompt` — placeholder 로직을
+   `clients/llm_client.LlmClient.generate()` 호출로 교체 (wordpress_writer와
+   동일한 패턴: MasterContent만 근거로 삼고, LLM 응답은 구조화된 스키마로
+   검증한 뒤에만 반영)
 2. `clients/wordpress_client.py` + `modules/wordpress_publisher` —
    WordPress REST API 실제 연동
 3. `clients/search_console_client.py` + `modules/performance_tracker`

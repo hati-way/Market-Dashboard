@@ -10,30 +10,30 @@ from modules.youtube_meta.generator import generate_youtube_meta
 SAMPLE_INPUT = "data/input/sample_market_data.json"
 
 
-def _content_with_wordpress():
+def _content_with_wordpress(fake_llm_client):
     market_data = load_market_data_from_json_file(SAMPLE_INPUT)
     content = build_master_content(topic="미국 증시 브리핑", market_data=market_data)
-    return generate_wordpress_content(content)
+    return generate_wordpress_content(content, llm_client=fake_llm_client)
 
 
-def test_threads_writer_independent():
-    content = generate_threads_content(_content_with_wordpress())
+def test_threads_writer_independent(fake_llm_client):
+    content = generate_threads_content(_content_with_wordpress(fake_llm_client))
     assert content.threads.posts
     assert content.threads.posts[0].text
 
 
-def test_notebooklm_script_independent():
-    content = generate_notebooklm_script(_content_with_wordpress())
+def test_notebooklm_script_independent(fake_llm_client):
+    content = generate_notebooklm_script(_content_with_wordpress(fake_llm_client))
     assert content.notebooklm.script
 
 
-def test_youtube_meta_independent():
-    content = generate_youtube_meta(_content_with_wordpress())
+def test_youtube_meta_independent(fake_llm_client):
+    content = generate_youtube_meta(_content_with_wordpress(fake_llm_client))
     assert content.youtube.title
     assert content.youtube.chapters
 
 
-def test_thumbnail_prompt_independent():
-    content = generate_thumbnail_assets(_content_with_wordpress())
+def test_thumbnail_prompt_independent(fake_llm_client):
+    content = generate_thumbnail_assets(_content_with_wordpress(fake_llm_client))
     assert content.thumbnail.midjourney_prompt
     assert content.thumbnail.canva_text

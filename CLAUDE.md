@@ -61,7 +61,7 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
 | `modules/master_content/schema.py` | Master Content JSON의 pydantic 스키마 정의 (가장 먼저 봐야 할 파일) |
 | `modules/master_content/builder.py` | MasterContent 생성/저장/로드 |
 | `modules/data_ingest/` | 1단계: 원본 데이터 → `MarketData` 변환 |
-| `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움 |
+| `modules/wordpress_writer/` | 3단계: `MasterContent` → `wordpress` 필드 채움. Anthropic Claude 실제 연동, `models.py`(WordPressArticle), `markdown_html.py`(안전한 마크다운→HTML 변환) 포함 |
 | `modules/quality_check/` | 4단계: seo/aeo/geo/neo 개별 checker + 통합 `checker.py` |
 | `modules/wordpress_publisher/` | 5단계: 발행 (현재 미구현, `clients/wordpress_client.py` 완성 후 연결) |
 | `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
@@ -81,30 +81,49 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       update_triggers, confidence. `Fact`는 claim/source 필수, 날짜는
       ISO 형식만 허용, source_type/confidence는 Enum으로 값 제한
       (`tests/test_master_content_validation.py`)
-- [x] 1~4단계 + 6~9단계 placeholder 구현 (LLM 없이도 파이프라인 전체가 동작)
+- [x] 5~9단계 중 6~9단계는 placeholder 구현 (LLM 없이도 동작)
 - [x] SEO/AEO/GEO/NEO 규칙 기반 품질 검사
-- [x] `pipeline/orchestrator.py`, `main.py`
+- [x] `pipeline/orchestrator.py`, `main.py` (`llm_client`를 주입할 수 있게
+      선택적 파라미터로 열어둠)
 - [x] LLM 클라이언트 (`clients/llm_client.py`, Anthropic Claude 연동,
-      `generate(user_prompt, system_prompt=None, temperature=..., max_tokens=..., timeout=...)`
-      단일 인터페이스, `LlmConfigError`/`LlmRetryableError`/`LlmFatalError`
-      구분, mocking 테스트 `tests/test_llm_client.py`)
+      `generate(user_prompt, system_prompt=None, max_tokens=..., timeout=...,
+      extra_options=...)` 단일 인터페이스). Claude Sonnet 5는
+      temperature/top_p/top_k 같은 비기본 sampling 옵션을 보내면 오류가
+      날 수 있어 기본 경로에서는 아예 보내지 않는다. 모델별 옵션은
+      extra_options(→ extra_body)로만 확장한다. `LlmConfigError`/
+      `LlmRetryableError`/`LlmFatalError` 구분, mocking 테스트
+      `tests/test_llm_client.py`
+- [x] **3단계: `modules/wordpress_writer` 를 Anthropic Claude 기반 실제
+      생성으로 교체.** MasterContent.market_data + analysis 를 JSON으로
+      프롬프트에 명시적으로 넣고, "제공된 MasterContent만 사실의
+      근거로 사용한다"는 원칙을 system prompt에 포함. LLM 응답은
+      `modules/wordpress_writer/models.WordPressArticle` 로 파싱/검증한
+      뒤에만 반영(파싱 실패 시 `WordPressGenerationError`). content_html은
+      LLM 값을 신뢰하지 않고 `markdown_html.markdown_to_html()`로 시스템이
+      직접 변환(허용 문법 외 텍스트는 escape). source_list도 LLM 값을
+      무시하고 `MasterContent.analysis.sources/facts`에서 시스템이 직접
+      생성. 본문의 소수점 숫자가 MasterContent에 실제로 존재하는지
+      최소한으로 검증해 없는 숫자가 있으면 `HallucinationDetectedError`.
+      `generate_wordpress_content(content, llm_client=None)`처럼
+      `llm_client`를 주입할 수 있어 테스트가 실제 API를 부르지 않는다.
+      테스트: `tests/test_wordpress_writer.py`, 공용 fixture는
+      `tests/conftest.py`의 `FakeLlmClient`/`fake_llm_client`.
 - [x] 기본 테스트 스위트
 
 다음에 할 일 (권장 순서):
 
-1. **콘텐츠 생성 모듈을 LLM 기반으로 교체**
-   - `modules/wordpress_writer/generator.py`의 `_build_placeholder_html`
-     를 `clients/llm_client.LlmClient.generate()` 호출로 교체
-   - 같은 방식으로 `threads_writer`, `notebooklm_script`,
-     `youtube_meta`, `thumbnail_prompt`도 교체
-   - 각 모듈의 함수 시그니처는 바꾸지 않는다 (`MasterContent -> MasterContent`)
-   - 이때 `MasterContent.analysis`(facts/sources/bull_case/bear_case 등)를
-     프롬프트의 근거로 사용하도록 연결한다
+1. **나머지 콘텐츠 생성 모듈을 LLM 기반으로 교체**
+   - `threads_writer`, `notebooklm_script`, `youtube_meta`,
+     `thumbnail_prompt`를 `wordpress_writer`와 같은 패턴으로 교체:
+     MasterContent(+ 이미 생성된 wordpress 필드)를 근거로 프롬프트를
+     만들고, 구조화된 스키마로 응답을 파싱/검증한 뒤에만 반영
+   - 각 모듈의 함수 시그니처는 바꾸지 않는다 (`MasterContent -> MasterContent`),
+     테스트 가능하도록 `llm_client` 주입 파라미터를 추가한다
 2. **`modules/analysis` (또는 유사한) 모듈 추가 검토**
-   - 지금은 `analysis` 필드가 스키마에만 존재하고 이를 채우는 전용
-     모듈은 아직 없다. market_data → analysis 를 채우는 단계를
-     LLM 기반으로 새로 만들지, 3단계(wordpress_writer) 이전에 별도
-     단계로 둘지 결정 필요
+   - 지금은 `analysis` 필드를 채우는 전용 모듈이 없어 테스트/수동으로
+     직접 채워야 한다. market_data → analysis 를 채우는 단계를 LLM
+     기반으로 새로 만들지, 3단계(wordpress_writer) 이전에 별도 단계로
+     둘지 결정 필요
 3. **품질 검사 고도화**
    - 지금은 규칙 기반(길이, 키워드 포함 여부)만 있음
    - 필요하면 LLM을 이용한 정성적 평가를 추가 (예: AEO 검사에서

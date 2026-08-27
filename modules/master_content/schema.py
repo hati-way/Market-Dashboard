@@ -151,8 +151,10 @@ class WordPressContent(BaseModel):
     slug: str = ""
     excerpt: str = ""
     content_html: str = ""
+    content_markdown: str = ""
     tags: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
+    source_list: list[str] = Field(default_factory=list)
     seo: SeoMeta = Field(default_factory=SeoMeta)
 
 
