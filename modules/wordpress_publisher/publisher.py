@@ -31,10 +31,12 @@ from .models import PublishAction, PublishOutcome
 logger = logging.getLogger(__name__)
 
 
-def _resolve_wordpress_status(decision: PublicationDecision, draft_first: bool) -> str | None:
+def resolve_wordpress_status(decision: PublicationDecision, draft_first: bool) -> str | None:
     """WordPress에 만들 post의 status("draft"/"publish")를 정한다.
 
-    None이면 아무것도 만들지 않는다(=blocked).
+    None이면 아무것도 만들지 않는다(=blocked). pipeline/quality_report.py의
+    CLI 리포트도 이 함수를 그대로 가져다 써서, 화면에 보여주는 "WordPress
+    예정 status"가 실제 발행 로직과 어긋나는 일이 없게 한다.
     """
     if decision.recommended_status == RecommendedStatus.BLOCKED:
         return None
@@ -91,7 +93,7 @@ def publish_to_wordpress(
             recommendations=gate_result.recommendations,
         )
 
-    wordpress_status = _resolve_wordpress_status(decision, draft_first)
+    wordpress_status = resolve_wordpress_status(decision, draft_first)
 
     if dry_run:
         logger.info(

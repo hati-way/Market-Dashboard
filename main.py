@@ -32,7 +32,10 @@ import logging
 from clients.wordpress_client import WordPressClient, WordPressClientError
 from clients.wordpress_oauth_setup import run_oauth_setup
 from config.settings import get_settings
+from modules.master_content.schema import MasterContent
+from modules.quality_gate.gate import decide_publication, run_quality_gate_for_content
 from pipeline.orchestrator import run_pipeline
+from pipeline.quality_report import build_quality_gate_report
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,6 +87,20 @@ def _run_wordpress_connection_test() -> None:
     print(f"WordPress 연결 성공: 사용자={name}")
 
 
+def _print_quality_gate_report(content: MasterContent) -> None:
+    """--publish 실행 후 Quality Gate 판정을 사람이 읽을 수 있게 출력한다.
+
+    content.wordpress(3단계에서 생성 완료된 값)만으로 다시 계산하므로
+    WordPress API를 호출하지 않는다. get_settings()로 읽는 wordpress_
+    draft_first는 실제 publish_to_wordpress()가 쓴 것과 같은 값이라
+    "WordPress 예정 status"가 실제 발행 로직과 어긋나지 않는다.
+    """
+    gate_result = run_quality_gate_for_content(content)
+    decision = decide_publication(gate_result)
+    draft_first = get_settings().wordpress_draft_first
+    print(build_quality_gate_report(gate_result, decision, draft_first=draft_first))
+
+
 def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
@@ -117,7 +134,7 @@ def main() -> None:
                 print(f"  [{channel.upper()}] {issue}")
 
     if args.publish:
-        print(f"WordPress 발행 상태: {content.publish.published}, post_id={content.publish.post_id}")
+        _print_quality_gate_report(content)
 
 
 if __name__ == "__main__":

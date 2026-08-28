@@ -126,7 +126,14 @@ python main.py --topic "미국 증시 브리핑" --input data/input/sample_marke
 
 실행이 끝나면:
 - `data/master/<id>.json` 에 Master Content JSON이 저장됩니다.
-- 콘솔에 SEO/AEO/GEO/NEO 품질 검사 통과 여부와 미통과 사유가 출력됩니다.
+- 콘솔에 SEO/AEO/GEO/NEO 품질 검사(기존, 규칙 기반 pass/fail) 통과 여부와
+  미통과 사유가 출력됩니다.
+- `--publish`를 함께 주면 Quality Gate(점수 기반) 결과도 출력됩니다:
+  Fact/SEO/AEO/GEO/NEO/Overall 점수, 최종 Quality Status, failures/
+  warnings/recommendations, REVIEW_REQUIRED·FAIL이 된 이유(한국어),
+  Publication Decision, WordPress 예정 status(draft/publish/발행 안 함).
+  API key/token 등 비밀값은 절대 출력되지 않습니다
+  (`pipeline/quality_report.py`).
 
 나만의 데이터로 실행하고 싶다면 `data/input/sample_market_data.json`
 과 같은 형식으로 새 JSON 파일을 만들고 `--input` 옵션에 경로를
