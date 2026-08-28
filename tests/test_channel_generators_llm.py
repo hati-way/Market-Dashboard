@@ -49,14 +49,14 @@ def _load_treasury_content():
 # fixture 안의 값만 근거로 쓰는 정상적인 채널별 응답.
 GOOD_THREADS = {
     "posts": [
-        "미국이 국채를 다시 사들이는 규모를 키웠다. 300억 달러, 왜 하필 지금일까.",
-        "이번 바이백은 유동성이 얇은 만기 구간을 겨냥했다. 그 구간이 풀리면 금리 변동성이 줄어들 수 있다.",
-        "10년물 금리는 4.05%로 내렸다. 달러 인덱스는 101.2로 소폭 올랐다.",
-        "다음 분기 재융자 발표(QRA)를 봐야 이 흐름이 이어지는지 알 수 있다.",
+        "1/4 미국 재무부가 국채를 다시 사들이기 시작했다. 규모는 300억 달러. 왜 하필 지금, 이만큼일까.",
+        "2/4 이번 바이백은 유동성이 얇은 만기 구간을 겨냥했다. 바이백 확대 → 유동성 개선 → 금리 변동성 완화. 중요한 건 어느 구간을 지원하느냐다.",
+        "3/4 발표 직후 10년물 금리는 4.05%로 내렸다. 그래서 위험자산엔 우호적인 신호로 읽힌다. 일부 시장 참여자는 장기물 발행 부담도 줄어들 수 있다고 본다.",
+        "4/4 앞으로 볼 건 다음 QRA와 차기 바이백 운영 일정이다. 결론: 숫자보다 재무부가 어느 구간을 지원하는지가 핵심이다.",
     ],
-    "hook": "미국이 국채를 다시 사들이는 규모를 키웠다.",
+    "hook": "미국이 국채를 다시 사들이는 규모를 키웠다. 300억 달러, 왜 하필 지금일까.",
     "key_message": "바이백은 규모보다 어느 구간을 지원하느냐가 중요하다.",
-    "used_fact_ids": ["fact_001", "fact_002", "fact_003"],
+    "used_fact_ids": ["fact_001", "fact_002", "fact_004"],
 }
 
 GOOD_NOTEBOOKLM = {
@@ -267,7 +267,7 @@ def test_threads_fails_on_hallucinated_number():
     content = _load_treasury_content()
     hallucinated = {
         **GOOD_THREADS,
-        "posts": [*GOOD_THREADS["posts"][:-1], "관련 국채 선물 가격은 650.12를 나타냈다."],
+        "posts": [*GOOD_THREADS["posts"][:-1], "4/4 관련 국채 선물 가격은 650.12를 나타냈다."],
     }
     fake_client = FakeLlmClient(json.dumps(hallucinated, ensure_ascii=False))
 

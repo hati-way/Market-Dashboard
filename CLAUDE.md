@@ -314,6 +314,29 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       (15개, 파싱 안정성/repair 재시도 상한/usage 기록),
       `tests/test_youtube_quality.py`(15개, id 노출 차단·tags 검증·
       chapters 도출·기존 Fact Grounding 유지 확인).
+- [x] **Threads 채널 전용 문체 강화(NotebookLM/YouTube/Thumbnail은
+      미변경).** 생성된 글이 WordPress 요약문처럼 설명형으로 길어지는
+      문제를 고쳤다. `ThreadsOutput`(`modules/threads_writer/models.py`)
+      에 `model_validator`를 추가해 각 post가 실제 전체 개수와 맞는
+      "1/4 ", "2/4 " 형식으로 시작하는지 강제한다(개수 자체는 기존과
+      동일하게 3~5개, `DEFAULT_POST_COUNT=4`를 기본으로 안내).
+      `generator.py`의 시스템 프롬프트를 다시 써서 기사체/리포트체
+      금지("~로 나타났다"/"~라고 밝혔다"/"~을 시사한다" 등)를 명시하고,
+      인과관계는 가능하면 "→"로("바이백 확대 → 유동성 개선 → 금리
+      변동성 완화"), 문장 사이에는 "중요한 건"/"그런데"/"그래서"/
+      "앞으로 볼 건" 같은 자연스러운 연결어를 실제로 쓰도록 지침을
+      추가했다. 첫 post(hook)는 2~4개의 짧은 문장, 각 post는 하나의
+      메시지만, 마지막 post는 지표+한 줄 결론이라는 구조도 명시했다.
+      YouTube와 같은 원칙으로 `_check_no_internal_ids_leaked()`를
+      추가해 posts/hook/key_message에 `fact_004` 같은 내부 식별자가
+      노출되면 `ThreadsInternalIdLeakError`로 막는다(YouTube와 로직을
+      공유하지 않고 이 파일에 독립적으로 구현 - 채널별 파일 독립성
+      유지). 저확신도 fact는 "일부 시장 참여자는 ~라고 본다"처럼
+      제한적으로만 쓰도록 프롬프트에 명시. Fact Grounding/Quality Gate
+      판정 기준은 전혀 손대지 않았다. 테스트: `tests/test_threads_style.py`
+      (20개, 번호 매김 강제/hook 문장 수/화살표·연결어 지침/기사체
+      금지/내부 id 노출 차단/저확신도 표현/기존 Fact Grounding 유지
+      확인).
 
 다음에 할 일 (권장 순서):
 

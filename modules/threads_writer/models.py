@@ -5,13 +5,18 @@ LLM의 자유형 텍스트 응답을 그대로 저장하지 않고, 이 모델�
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 MIN_POSTS = 3
 MAX_POSTS = 5
+DEFAULT_POST_COUNT = 4
 MAX_POST_LENGTH = 400
+
+# 각 post는 "1/4 "처럼 "현재번호/전체개수 " 형태로 시작해야 한다.
+_POST_NUMBER_RE = re.compile(r"^(\d+)/(\d+)\s")
 
 
 def _now_iso() -> str:
@@ -45,3 +50,22 @@ class ThreadsOutput(BaseModel):
                     f"{i}번째 post가 {MAX_POST_LENGTH}자를 넘습니다(현재 {len(post)}자)."
                 )
         return value
+
+    @model_validator(mode="after")
+    def _validate_post_numbering(self) -> "ThreadsOutput":
+        """각 post가 "1/4 ", "2/4 "처럼 실제 전체 개수와 맞는 번호로
+        시작하는지 확인한다(개수 검증과 달리 post 개수 자체가 있어야
+        전체 개수를 알 수 있어 field_validator가 아닌 model_validator로
+        확인한다).
+        """
+        total = len(self.posts)
+        for i, post in enumerate(self.posts, start=1):
+            match = _POST_NUMBER_RE.match(post)
+            expected = f"{i}/{total}"
+            actual = f"{match.group(1)}/{match.group(2)}" if match else None
+            if actual != expected:
+                raise ValueError(
+                    f"{i}번째 post는 \"{expected} \"로 시작해야 합니다"
+                    f"(현재 시작 부분: {post[:20]!r})."
+                )
+        return self
