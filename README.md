@@ -160,6 +160,61 @@ python main.py --input data/input/sample_treasury_buyback.json --publish --dry-r
 pytest
 ```
 
+## 새 Windows PC에서 시작하기
+
+집 PC나 다른 Windows PC에서 이 프로젝트를 처음 설정할 때는 아래
+최소 단계만 실행하면 됩니다(PowerShell 사용).
+
+```powershell
+git clone ...
+cd Market-Dashboard
+git switch claude/donmac-content-automation-arch-1dydyv
+powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1
+notepad .env
+py main.py --wordpress-test
+```
+
+`setup_windows.ps1`은 다음을 순서대로 확인/수행합니다:
+
+- Python/Git 설치 여부 확인, Python 버전 출력, pip 사용 가능 여부 확인
+- `PYTHONUTF8=1` 설정(한글 처리를 위해 필요, User 환경변수로 저장)
+- `requirements.txt` 설치
+- `.env` 파일 존재 확인 — 없으면 `.env.example`을 복사해 생성하고,
+  **이미 있으면 절대 덮어쓰지 않습니다**
+- `.env`가 `.gitignore`로 git 추적에서 제외되는지 확인
+- WordPress 관련 환경변수(`WORDPRESS_AUTH_MODE`,
+  `WORDPRESS_COM_SITE_ID`, `WORDPRESS_COM_ACCESS_TOKEN`,
+  `WORDPRESS_COM_CLIENT_ID`, `WORDPRESS_COM_CLIENT_SECRET`,
+  `WORDPRESS_COM_REDIRECT_URI`)와 `ANTHROPIC_API_KEY`의 **"configured"/
+  "missing" 여부만** 출력합니다 — 실제 값은 어떤 경우에도 화면에
+  출력하지 않습니다.
+- 기존에 `WORDPRESS_COM_ACCESS_TOKEN`이 이미 `.env`에 있다면(다른 PC에서
+  이미 OAuth 인증을 마친 `.env`를 그대로 옮겨온 경우) 새로 OAuth 인증할
+  필요가 없다고 안내합니다. 이 토큰이 없을 때만
+  `py main.py --wordpress-oauth-setup`을 실행하라고 안내합니다.
+- `WORDPRESS_DRY_RUN`/`WORDPRESS_DRAFT_FIRST`가 `false`로 설정되어
+  있으면 경고만 출력합니다(자동으로 고치지 않습니다 — 이 값을 바꾸는
+  것은 항상 사용자의 명시적인 선택이어야 합니다).
+- 마지막으로 `py main.py --wordpress-test`와
+  `py main.py --input data/input/sample_treasury_buyback.json --publish --dry-run`
+  실행을 안내합니다.
+
+설치/생성 없이 현재 환경 상태만 점검하고 싶다면 `-CheckOnly` 옵션을
+추가로 줄 수 있습니다:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup_windows.ps1 -CheckOnly
+```
+
+**재사용 가능한 credential**: 다른 PC(예: 회사 PC)에서 이미 값을 채운
+`.env` 파일을 새 PC로 안전하게 옮겨오면(직접 파일 복사로, git이 아닌
+방법으로), `ANTHROPIC_API_KEY`와 WordPress OAuth 관련 값
+(`WORDPRESS_COM_ACCESS_TOKEN` 등)을 그대로 재사용할 수 있어 새 PC에서
+다시 API 키 발급이나 OAuth 인증을 할 필요가 없습니다. **다시 OAuth
+인증이 필요한 경우**는 `WORDPRESS_COM_ACCESS_TOKEN`이 없거나(예: `.env`를
+옮기지 않고 새로 `.env.example`에서 생성한 경우), 토큰이 만료/폐기된
+경우뿐입니다.
+
 ## 지금 할 수 있는 것 / 아직 안 되는 것
 
 | 단계 | 상태 |
