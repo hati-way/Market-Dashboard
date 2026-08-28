@@ -37,6 +37,16 @@ def _set_wordpress_env(monkeypatch, url: str = "https://example.com") -> None:
     monkeypatch.setenv("WORDPRESS_APP_PASSWORD", "sk-super-secret-app-password")
 
 
+def _set_wordpress_com_oauth2_env(
+    monkeypatch,
+    site_id: str = "example.wordpress.com",
+    access_token: str = "wpcom-super-secret-access-token",
+) -> None:
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "wordpress_com_oauth2")
+    monkeypatch.setenv("WORDPRESS_COM_SITE_ID", site_id)
+    monkeypatch.setenv("WORDPRESS_COM_ACCESS_TOKEN", access_token)
+
+
 def _fake_response(status_code: int, json_body: object = None) -> MagicMock:
     response = MagicMock()
     response.status_code = status_code
@@ -211,3 +221,99 @@ def test_find_post_by_slug_returns_first_match(monkeypatch):
         result = client.find_post_by_slug("my-post")
 
         assert result == {"id": 7, "slug": "my-post"}
+
+
+# ==== WordPress.com OAuth2 모드 ====
+# (Application Password를 지원하지 않는 WordPress.com Free 플랜용)
+
+
+def test_wordpress_com_oauth2_missing_site_id_raises_config_error(monkeypatch):
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "wordpress_com_oauth2")
+    monkeypatch.delenv("WORDPRESS_COM_SITE_ID", raising=False)
+    monkeypatch.setenv("WORDPRESS_COM_ACCESS_TOKEN", "token")
+
+    with pytest.raises(WordPressConfigError):
+        WordPressClient()
+
+
+def test_wordpress_com_oauth2_missing_access_token_raises_config_error(monkeypatch):
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "wordpress_com_oauth2")
+    monkeypatch.setenv("WORDPRESS_COM_SITE_ID", "example.wordpress.com")
+    monkeypatch.delenv("WORDPRESS_COM_ACCESS_TOKEN", raising=False)
+
+    with pytest.raises(WordPressConfigError):
+        WordPressClient()
+
+
+def test_wordpress_com_oauth2_unknown_auth_mode_falls_back_to_app_password(monkeypatch):
+    # 오타 등 알 수 없는 값은 안전하게 app_password로 취급한다.
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "something-unknown")
+    _set_wordpress_env(monkeypatch)
+
+    client = WordPressClient()
+
+    assert client._auth_mode == "app_password"
+
+
+def test_wordpress_com_oauth2_builds_correct_url_and_uses_bearer_auth(monkeypatch):
+    _set_wordpress_com_oauth2_env(monkeypatch)
+
+    with patch("clients.wordpress_client.requests.request") as mock_request:
+        mock_request.return_value = _fake_response(200, {"id": 1, "name": "Admin"})
+        client = WordPressClient()
+        result = client.test_connection()
+
+        assert result == {"id": 1, "name": "Admin"}
+        args, kwargs = mock_request.call_args
+        url = args[1]
+        assert url == "https://public-api.wordpress.com/wp/v2/sites/example.wordpress.com/users/me"
+        # Basic auth(auth=)가 아니라 Bearer 헤더로 인증해야 한다.
+        assert "auth" not in kwargs or kwargs["auth"] is None
+        assert kwargs["headers"]["Authorization"] == "Bearer wpcom-super-secret-access-token"
+
+
+def test_wordpress_com_oauth2_create_post_uses_sites_endpoint(monkeypatch):
+    _set_wordpress_com_oauth2_env(monkeypatch, site_id="12345678")
+
+    with patch("clients.wordpress_client.requests.request") as mock_request:
+        mock_request.return_value = _fake_response(
+            201, {"id": 99, "link": "https://example.wordpress.com/?p=99", "status": "draft"}
+        )
+        client = WordPressClient()
+        result = client.create_post(title="제목", content_html="<p>본문</p>")
+
+        assert result["id"] == 99
+        args, kwargs = mock_request.call_args
+        assert args[1] == "https://public-api.wordpress.com/wp/v2/sites/12345678/posts"
+        assert kwargs["json"]["title"] == "제목"
+
+
+def test_wordpress_com_oauth2_access_token_never_appears_in_logs_or_exceptions(monkeypatch, caplog):
+    secret_token = "wpcom-super-secret-access-token"
+    _set_wordpress_com_oauth2_env(monkeypatch, access_token=secret_token)
+
+    with patch("clients.wordpress_client.requests.request") as mock_request:
+        mock_request.return_value = _fake_response(401, {"code": "authorization_required"})
+        client = WordPressClient(max_retries=0)
+
+        with caplog.at_level("DEBUG"):
+            with pytest.raises(WordPressFatalError) as exc_info:
+                client.test_connection()
+
+    assert secret_token not in caplog.text
+    assert secret_token not in str(exc_info.value)
+
+
+def test_wordpress_com_oauth2_retries_on_5xx_like_app_password_mode(monkeypatch):
+    _set_wordpress_com_oauth2_env(monkeypatch)
+
+    with patch("clients.wordpress_client.requests.request") as mock_request:
+        mock_request.side_effect = [
+            _fake_response(503, {"code": "unavailable"}),
+            _fake_response(200, {"id": 1, "name": "Admin"}),
+        ]
+        client = WordPressClient(max_retries=2)
+        result = client.test_connection()
+
+        assert result == {"id": 1, "name": "Admin"}
+        assert mock_request.call_count == 2

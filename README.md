@@ -156,7 +156,16 @@ pytest
 
 ## WordPress 발행을 실제로 확인하는 안전한 순서
 
-`.env`에 `WORDPRESS_URL`/`WORDPRESS_USERNAME`/`WORDPRESS_APP_PASSWORD`를 채운 뒤:
+WordPress 인증 방식은 두 가지이며 `WORDPRESS_AUTH_MODE`로 선택합니다.
+
+- `app_password`(기본): self-hosted WordPress. `WORDPRESS_URL`/
+  `WORDPRESS_USERNAME`/`WORDPRESS_APP_PASSWORD`를 채웁니다.
+- `wordpress_com_oauth2`: Application Password를 지원하지 않는
+  WordPress.com Free 플랜용. `WORDPRESS_COM_SITE_ID`(사이트 도메인 또는
+  숫자 site ID)와 `WORDPRESS_COM_ACCESS_TOKEN`(OAuth2 access token,
+  https://developer.wordpress.com/docs/oauth2/ 에서 미리 발급)을 채웁니다.
+
+`.env`에 해당 방식의 값을 채운 뒤:
 
 1. **연결만 확인**: `python main.py --wordpress-test`
 2. **dry-run으로 전체 파이프라인 확인** (WordPress API를 전혀 호출하지 않음):

@@ -1,11 +1,28 @@
 """WordPress REST API 클라이언트.
 
-WordPress Application Password 인증(HTTP Basic Auth)으로
-`/wp-json/wp/v2/*` 엔드포인트를 호출한다. URL/계정/비밀번호는 항상
-config.settings.get_settings() 를 통해서만 읽으며, 로그나 예외 메시지
-어디에도 인증정보(Authorization 헤더, 비밀번호)를 직접 출력하지 않는다
-(요청 인증은 requests의 `auth=` 파라미터에만 맡기고, 로그는 상태
-코드/시도 횟수 같은 메타 정보만 남긴다).
+두 가지 인증 방식을 지원하며, `WORDPRESS_AUTH_MODE`(config.settings)로
+선택한다.
+
+- "app_password"(기본): self-hosted WordPress의 Application Password
+  인증(HTTP Basic Auth)으로 `{WORDPRESS_URL}/wp-json/wp/v2/*` 를 호출한다.
+- "wordpress_com_oauth2": WordPress.com Free 플랜처럼 Application
+  Password를 지원하지 않는 사이트를 위한 OAuth2 access token(Bearer
+  인증)으로 WordPress.com의 공식 프록시 엔드포인트
+  `https://public-api.wordpress.com/wp/v2/sites/{site_id}/*` 를 호출한다.
+  Access token 발급(OAuth2 authorize/token 교환) 자체는 이 클라이언트의
+  책임이 아니다 — 이미 발급받은 access token을 .env에 넣어서 쓴다.
+
+두 방식 모두 `posts`/`users/me` 같은 하위 경로와 요청/응답 형태가
+동일하므로(WordPress.com이 wp/v2 API를 그대로 프록시한다), 이 클래스
+하나가 base URL 구성과 인증 방식만 모드에 따라 바꿔서 나머지 로직
+(create_post/update_post/get_post/find_post_by_slug/재시도/에러 분류)을
+공유한다.
+
+URL/계정/토큰은 항상 config.settings.get_settings() 를 통해서만 읽으며,
+로그나 예외 메시지 어디에도 인증정보(Authorization 헤더, 비밀번호,
+access token)를 직접 출력하지 않는다(요청 인증은 requests의 `auth=`
+파라미터 또는 Authorization 헤더에만 실어 보내고, 로그는 상태 코드/시도
+횟수 같은 메타 정보만 남긴다).
 """
 from __future__ import annotations
 
@@ -22,13 +39,21 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_RETRIES = 2
 _RETRY_BACKOFF_SECONDS = 1.0
 
+AUTH_MODE_APP_PASSWORD = "app_password"
+AUTH_MODE_WORDPRESS_COM_OAUTH2 = "wordpress_com_oauth2"
+_WORDPRESS_COM_API_ROOT = "https://public-api.wordpress.com"
+
 
 class WordPressClientError(Exception):
     """WordPress 클라이언트 관련 오류의 공통 베이스."""
 
 
 class WordPressConfigError(WordPressClientError):
-    """WORDPRESS_URL/USERNAME/APP_PASSWORD 등 필수 설정이 없을 때 발생한다."""
+    """인증 방식별 필수 설정이 없을 때 발생한다.
+
+    (app_password: WORDPRESS_URL/USERNAME/APP_PASSWORD,
+     wordpress_com_oauth2: WORDPRESS_COM_SITE_ID/ACCESS_TOKEN)
+    """
 
 
 class WordPressRetryableError(WordPressClientError):
@@ -51,31 +76,58 @@ class WordPressClient:
         timeout: float | None = None,
     ) -> None:
         settings = get_settings()
-        if not settings.wordpress_url:
-            raise WordPressConfigError(
-                "WORDPRESS_URL이 설정되지 않았습니다. .env 파일에 값을 채워주세요."
-            )
-        if not settings.wordpress_username or not settings.wordpress_app_password:
-            raise WordPressConfigError(
-                "WORDPRESS_USERNAME/WORDPRESS_APP_PASSWORD가 설정되지 않았습니다. "
-                ".env 파일에 값을 채워주세요."
-            )
+        self._auth_mode = settings.wordpress_auth_mode
+        # requests의 auth 파라미터(Basic) 또는 Authorization 헤더(Bearer)로만
+        # 전달한다 — 둘 다 값 자체를 로그/예외 메시지에 넣지 않는다.
+        self._auth: tuple[str, str] | None = None
+        self._bearer_token: str | None = None
 
-        # 끝의 슬래시를 제거해 /wp-json 이 중복되지 않게 한다.
-        self._base_url = settings.wordpress_url.rstrip("/")
-        # requests의 auth 파라미터로만 전달한다 — Authorization 헤더나
-        # 비밀번호 값 자체를 로그/예외 메시지에 넣지 않는다.
-        self._auth = (settings.wordpress_username, settings.wordpress_app_password)
+        if self._auth_mode == AUTH_MODE_WORDPRESS_COM_OAUTH2:
+            if not settings.wordpress_com_site_id:
+                raise WordPressConfigError(
+                    "WORDPRESS_COM_SITE_ID가 설정되지 않았습니다. .env 파일에 값을 채워주세요."
+                )
+            if not settings.wordpress_com_access_token:
+                raise WordPressConfigError(
+                    "WORDPRESS_COM_ACCESS_TOKEN이 설정되지 않았습니다. "
+                    ".env 파일에 값을 채워주세요."
+                )
+            site_id = settings.wordpress_com_site_id.strip().strip("/")
+            self._base_url = f"{_WORDPRESS_COM_API_ROOT}/wp/v2/sites/{site_id}"
+            self._bearer_token = settings.wordpress_com_access_token
+        else:
+            if not settings.wordpress_url:
+                raise WordPressConfigError(
+                    "WORDPRESS_URL이 설정되지 않았습니다. .env 파일에 값을 채워주세요."
+                )
+            if not settings.wordpress_username or not settings.wordpress_app_password:
+                raise WordPressConfigError(
+                    "WORDPRESS_USERNAME/WORDPRESS_APP_PASSWORD가 설정되지 않았습니다. "
+                    ".env 파일에 값을 채워주세요."
+                )
+            # 끝의 슬래시를 제거해 /wp-json 이 중복되지 않게 한다.
+            self._base_url = settings.wordpress_url.rstrip("/")
+            self._auth = (settings.wordpress_username, settings.wordpress_app_password)
+
         self._max_retries = max_retries if max_retries is not None else settings.wordpress_max_retries
         self._timeout = timeout if timeout is not None else settings.wordpress_timeout_seconds
 
     def _url(self, path: str) -> str:
-        return f"{self._base_url}/wp-json/wp/v2/{path.lstrip('/')}"
+        path = path.lstrip("/")
+        if self._auth_mode == AUTH_MODE_WORDPRESS_COM_OAUTH2:
+            # self._base_url 에 이미 /wp/v2/sites/{site_id} 까지 포함되어 있다.
+            return f"{self._base_url}/{path}"
+        return f"{self._base_url}/wp-json/wp/v2/{path}"
 
     def _request(self, method: str, path: str, **kwargs: object) -> dict | list:
         url = self._url(path)
         kwargs.setdefault("timeout", self._timeout)
-        kwargs["auth"] = self._auth
+        if self._bearer_token:
+            headers = dict(kwargs.get("headers") or {})
+            headers["Authorization"] = f"Bearer {self._bearer_token}"
+            kwargs["headers"] = headers
+        else:
+            kwargs["auth"] = self._auth
 
         last_exc: Exception | None = None
         total_attempts = self._max_retries + 1

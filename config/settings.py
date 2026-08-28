@@ -27,9 +27,17 @@ class Settings:
     app_env: str
     log_level: str
 
+    # 인증 방식: "app_password"(기본, self-hosted Application Password) 또는
+    # "wordpress_com_oauth2"(Application Password를 지원하지 않는
+    # WordPress.com Free 플랜용 OAuth2 access token). 그 외 값은 안전하게
+    # "app_password"로 취급한다.
+    wordpress_auth_mode: str
     wordpress_url: str | None
     wordpress_username: str | None
     wordpress_app_password: str | None
+    # wordpress_auth_mode="wordpress_com_oauth2" 일 때만 사용.
+    wordpress_com_site_id: str | None
+    wordpress_com_access_token: str | None
     # 아래 두 값의 기본값은 반드시 True로 유지한다. 운영자가 .env에서
     # 의도적으로 false로 바꾸기 전에는 자동으로 공개 발행되지 않아야 한다.
     wordpress_dry_run: bool
@@ -57,12 +65,19 @@ def get_settings() -> Settings:
     if existing_post_policy not in ("skip", "draft_update"):
         existing_post_policy = "skip"
 
+    auth_mode = (os.getenv("WORDPRESS_AUTH_MODE") or "app_password").strip().lower()
+    if auth_mode not in ("app_password", "wordpress_com_oauth2"):
+        auth_mode = "app_password"
+
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
+        wordpress_auth_mode=auth_mode,
         wordpress_url=os.getenv("WORDPRESS_URL") or None,
         wordpress_username=os.getenv("WORDPRESS_USERNAME") or None,
         wordpress_app_password=os.getenv("WORDPRESS_APP_PASSWORD") or None,
+        wordpress_com_site_id=os.getenv("WORDPRESS_COM_SITE_ID") or None,
+        wordpress_com_access_token=os.getenv("WORDPRESS_COM_ACCESS_TOKEN") or None,
         wordpress_dry_run=_parse_bool(os.getenv("WORDPRESS_DRY_RUN"), default=True),
         wordpress_draft_first=_parse_bool(os.getenv("WORDPRESS_DRAFT_FIRST"), default=True),
         wordpress_existing_post_policy=existing_post_policy,

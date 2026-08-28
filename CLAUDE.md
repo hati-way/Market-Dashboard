@@ -148,13 +148,21 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       본문을 임의로 수정하지 않고 검사만 한다. 테스트:
       `tests/test_quality_gate.py` (14개).
 - [x] **WordPress 실제 발행 연동 + Quality Gate 파이프라인 연결.**
-      `clients/wordpress_client.py`: Application Password(HTTP Basic
-      Auth)로 `/wp-json/wp/v2/*` 호출. `test_connection`/`create_post`/
-      `update_post`/`get_post`/`find_post_by_slug` 제공. timeout/연결
+      `clients/wordpress_client.py`: `WORDPRESS_AUTH_MODE`로 두 인증
+      방식 중 선택. 기본값 `app_password`는 self-hosted WordPress의
+      Application Password(HTTP Basic Auth)로 `{WORDPRESS_URL}/wp-json/
+      wp/v2/*` 를 호출한다. `wordpress_com_oauth2`는 Application
+      Password를 지원하지 않는 WordPress.com Free 플랜용으로, OAuth2
+      access token(Bearer 인증)으로 `https://public-api.wordpress.com/
+      wp/v2/sites/{WORDPRESS_COM_SITE_ID}/*` 를 호출한다(토큰 발급 자체는
+      이 클라이언트 밖에서 이미 끝났다고 가정). 두 모드 모두 `test_connection`/
+      `create_post`/`update_post`/`get_post`/`find_post_by_slug`
+      인터페이스와 재시도/에러 분류 로직을 공유한다. timeout/연결
       오류/429/5xx는 `WordPressRetryableError`(최대 재시도 횟수는
       `WORDPRESS_MAX_RETRIES`로 설정), 4xx는 `WordPressFatalError`로
-      구분. 인증정보는 요청 `auth=` 파라미터로만 전달하고 로그/예외
-      메시지에 절대 남기지 않는다. `modules/wordpress_publisher/`: Quality
+      구분. 인증정보(Basic auth 튜플 또는 Bearer 토큰)는 요청 자체에만
+      실어 보내고 로그/예외 메시지에 절대 남기지 않는다.
+      `modules/wordpress_publisher/`: Quality
       Gate 결과(`QualityGateResult`)와 `PublicationDecision`을 받아
       `PublishOutcome`(action/wordpress_status/post_id/url 등)을 반환.
       **기본값은 항상 안전한 쪽**: `WORDPRESS_DRY_RUN=true`(기본)면
@@ -171,7 +179,8 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       호출한다(`WordPressContent`에 새로 추가한 `used_fact_ids` 필드로
       생성 시점의 Fact Grounding 검증 결과를 재구성). `main.py`에
       `--wordpress-test`(연결 확인) / `--dry-run` 플래그 추가. 테스트:
-      `tests/test_wordpress_client.py`(11개), `tests/test_wordpress_publisher.py`
+      `tests/test_wordpress_client.py`(18개, WordPress.com OAuth2
+      모드 7개 포함), `tests/test_wordpress_publisher.py`
       (12개), `tests/test_pipeline.py`에 통합 테스트 2개 추가.
 - [x] 기본 테스트 스위트
 
