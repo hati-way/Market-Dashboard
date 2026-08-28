@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator
 
 TITLE_CANDIDATE_COUNT = 5
+MIN_TAGS = 5
+MAX_TAGS = 8
 
 
 def _now_iso() -> str:
@@ -35,4 +37,17 @@ class YouTubeOutput(BaseModel):
     def _validate_recommended_title(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("recommended_title이 비어 있습니다.")
+        return value
+
+    @field_validator("tags")
+    @classmethod
+    def _validate_tags(cls, value: list[str]) -> list[str]:
+        if not (MIN_TAGS <= len(value) <= MAX_TAGS):
+            raise ValueError(f"tags는 {MIN_TAGS}~{MAX_TAGS}개여야 합니다(현재 {len(value)}개).")
+        seen: set[str] = set()
+        for tag in value:
+            normalized = tag.strip().lower()
+            if normalized in seen:
+                raise ValueError(f"중복되는 tag가 있습니다: {tag!r}")
+            seen.add(normalized)
         return value

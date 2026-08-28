@@ -281,6 +281,39 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       `tests/test_wordpress_typography.py`(7개, CSS 파일 존재/selector/
       media query + 기존 H1 중복 방지·heading 순서·제목 길이 검사가
       여전히 동작하는지 재확인).
+- [x] **YouTube 채널 structured output 안정성/품질 개선(Threads/
+      NotebookLM/Thumbnail은 미변경).** 실제 `--generate-all` 실행에서
+      코드펜스 없이 응답 앞에 설명 문구가 붙으면("Here's the
+      metadata:\n\n{...}") 기존 파서(`modules/shared_grounding/
+      generation_support.parse_llm_json`, 코드펜스 있는 응답만 안정적)
+      가 "Expecting value: line 1 column 1"로 실패하는 문제가 있었다.
+      `modules/youtube_meta/generator.py`에만 독립적으로 더 안정적인
+      추출기(`_extract_json_object`, 코드펜스 유무·앞뒤 설명문 유무와
+      무관하게 첫 `{`부터 중괄호 깊이를 세어 대응하는 `}`까지 추출)를
+      추가하고, 실패 시 무한 재시도 대신 짧고 강한 repair 프롬프트로
+      최대 1회만 재시도한다(원 시도 + repair = 총 2회). 로그/에러
+      메시지에는 raw response 전체 대신 길이+앞 80자 미리보기만 남긴다.
+      이어서 실제 생성 결과에서 `pinned_comment`에 `fact_001` 같은
+      내부 Fact ID가 그대로 노출되는 품질 문제를 발견해, 시청자 노출
+      필드(title_candidates/recommended_title/description/pinned_comment/
+      tags)에 내부 fact id가 섞이면 `YoutubeInternalIdLeakError`로 막고
+      같은 schema-repair 재시도 경로를 태우도록 확장했다(내부용
+      `fact_validation_warnings`/`used_fact_ids` 필드 자체는 그대로 id를
+      담아 QA 추적용으로 유지). `YouTubeOutput.tags`에 5~8개 + 대소문자
+      무관 중복 금지 검증 추가. `chapters`는 항상 비어 있던 문제를
+      고쳐, NotebookLM이 먼저 실행됐으면 그 챕터를(9개→4~7개로 대표
+      제목만 압축), 없으면 `MasterContent.analysis`에 실제로 존재하는
+      섹션만으로 4~7개 챕터 후보를 코드에서 직접 만든다(빈 섹션을
+      지어내 채우지 않음). 타임스탬프는 NotebookLM 목표 분량(4~7분)
+      중간값을 균등 배분한 "예상" 값임을 문서화했다(실제 편집 후
+      재조정 전제). 시스템 프롬프트도 자연스러운 영상 설명문 문체(첫
+      2줄 핵심 압축, 보고서체 상투어 금지)·태그 중복 금지·저확신도
+      fact를 "일부 시장 참여자는 ~라고 본다"처럼 내부 id 없이 자연어로
+      표현하도록 강화했다. Fact Grounding/Quality Gate 판정 기준은
+      전혀 손대지 않았다. 테스트: `tests/test_youtube_json_parsing.py`
+      (15개, 파싱 안정성/repair 재시도 상한/usage 기록),
+      `tests/test_youtube_quality.py`(15개, id 노출 차단·tags 검증·
+      chapters 도출·기존 Fact Grounding 유지 확인).
 
 다음에 할 일 (권장 순서):
 

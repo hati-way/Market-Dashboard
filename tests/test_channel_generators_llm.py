@@ -97,7 +97,7 @@ GOOD_YOUTUBE = {
         "출처: U.S. Department of the Treasury\n"
         "본 영상은 투자 권유가 아닙니다."
     ),
-    "tags": ["미국국채", "바이백", "국채금리"],
+    "tags": ["미국국채", "바이백", "국채금리", "재무부", "거시경제"],
     "pinned_comment": "오늘의 핵심: 300억 달러 바이백, 10년물 금리 4.05%",
     "used_fact_ids": ["fact_001", "fact_002"],
 }
