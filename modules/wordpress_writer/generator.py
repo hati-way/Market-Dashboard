@@ -175,13 +175,26 @@ def _normalize_number(value: object) -> str | None:
 
 
 def _collect_allowed_numbers(content: MasterContent) -> set[str]:
-    """본문에 등장해도 되는(=MasterContent에 실제로 존재하는) 소수점 숫자 집합."""
+    """본문에 등장해도 되는(=MasterContent에 실제로 존재하는) 소수점 숫자 집합.
+
+    _DECIMAL_NUMBER_RE(`\\d+\\.\\d+`)는 부호(-)를 애초에 캡처하지 않으므로
+    본문에서 추출되는 값은 항상 부호 없는 절대값이다("하락했다"처럼 방향을
+    단어로 표현하거나, 설령 "-0.03%"처럼 명시적으로 부호를 써도 정규식은
+    "0.03"만 잡는다). 반면 change_percent 같은 값은 MasterContent에 부호가
+    있는 채로("-0.03") 저장되어 있어, 부호를 그대로 허용 목록에 넣으면
+    음수인 실제 수치를 본문에 아무리 정확히 옮겨 적어도 절대 매칭되지
+    않는다. 그래서 음수 값은 절대값도 함께 허용 목록에 넣어 이 비대칭을
+    바로잡는다(값 자체를 새로 허용하는 게 아니라, 어차피 부호를 검사할 수
+    없는 이 정규식 기준에 맞춰 비교 방식을 맞추는 것이다).
+    """
     numbers: set[str] = set()
 
     def add(value: object) -> None:
         normalized = _normalize_number(value)
         if normalized is not None:
             numbers.add(normalized)
+            if normalized.startswith("-"):
+                numbers.add(normalized[1:])
 
     for point in (
         *content.market_data.indices,

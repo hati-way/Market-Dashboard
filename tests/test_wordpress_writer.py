@@ -13,6 +13,7 @@ from modules.master_content.schema import (
     Analysis,
     ConfidenceLevel,
     Fact,
+    MarketDataPoint,
     MasterContent,
     Source,
     SourceType,
@@ -240,3 +241,35 @@ def test_hallucinated_number_is_detected_and_blocked():
 
     # 잘못된 글은 MasterContent.wordpress 에 반영되지 않아야 한다.
     assert content.wordpress.title == before_title
+
+
+# ---- 9. 음수 change_percent가 부호 없는 자연어로 표현된 경우 오탐(false positive) 방지 ----
+# (실제 dry-run 회귀 케이스: sample_treasury_buyback.json의 10년물 국채금리
+# change_percent=-0.03을 LLM이 "0.03%p 하락했다"처럼 부호 없이 표현하자
+# HallucinationDetectedError가 잘못 발생했다.)
+
+
+def test_negative_change_percent_expressed_without_sign_is_not_flagged_as_hallucination():
+    """본문에서 정규식(`\\d+\\.\\d+`)은 "-" 부호를 애초에 캡처하지 못하므로,
+    자연어에서 방향을 단어("하락했다")로 표현하면 추출값은 항상 부호 없는
+    "0.03"이 된다. MasterContent 쪽 change_percent=-0.03은 실제로 존재하는
+    값이므로, 부호 유무와 무관하게 예외 없이 통과해야 한다(값 자체를
+    새로 허용하는 게 아니라 기존에 존재하던 값의 부호 표현 차이일 뿐이다).
+    """
+    content = _content_with_analysis()
+    content.market_data.indices = [
+        MarketDataPoint(name="미국 10년물 국채금리", value=4.05, change_percent=-0.03, unit="%"),
+    ]
+    # "2.6%"는 _content_with_analysis()의 근원 PCE fact(value=2.6, unit="%")로
+    # 이미 근거가 있는 값이고, "0.03%p 하락"은 이번에 추가한 음수
+    # change_percent(-0.03)를 부호 없이 표현한 회귀 케이스다.
+    fabricated_markdown = (
+        "## 핵심 답변\n"
+        "근원 PCE가 2.6%로 예상치를 하회했고, 관련 국채금리는 전일 대비 "
+        "0.03%p 하락했다.\n"
+    )
+    fake_client = FakeLlmClient(_article_json(content_markdown=fabricated_markdown))
+
+    result = generate_wordpress_content(content, llm_client=fake_client)
+
+    assert "0.03" in result.wordpress.content_markdown

@@ -120,6 +120,24 @@ def _looks_like_it_has_concrete_facts(markdown_text: str) -> bool:
 # ---- MasterContent에서 "허용된" 값 모으기 ----
 
 
+def _add_with_unsigned_variant(allowed: set[str], value: object) -> None:
+    """정규화한 값을 허용 목록에 넣고, 음수면 부호 없는 절대값도 함께 넣는다.
+
+    _PERCENT_RE/_BP_RE(`\\d+(?:\\.\\d+)?`)는 "-" 부호를 애초에 캡처하지
+    않으므로 본문에서 추출되는 값은 항상 부호 없는 절대값이다("하락했다"
+    처럼 방향을 단어로 표현하거나, "-0.03%"처럼 명시적으로 부호를 써도
+    정규식은 "0.03"만 잡는다). change_percent 등 MasterContent 쪽 값은
+    부호가 있는 채로 저장되므로, 부호를 그대로 두면 음수인 실제 수치를
+    본문에 정확히 옮겨 적어도 절대 매칭되지 않는다. 새로운 값을 허용하는
+    게 아니라, 정규식이 원천적으로 부호를 비교할 수 없다는 사실에 맞춰
+    비교 방식을 맞추는 것이다.
+    """
+    normalized = _normalize_decimal(value)
+    allowed.add(normalized)
+    if normalized.startswith("-"):
+        allowed.add(normalized[1:])
+
+
 def _collect_allowed_percents(content: MasterContent) -> set[str]:
     allowed: set[str] = set()
     for point in (
@@ -128,14 +146,14 @@ def _collect_allowed_percents(content: MasterContent) -> set[str]:
         *content.market_data.commodities,
     ):
         if point.change_percent is not None:
-            allowed.add(_normalize_decimal(point.change_percent))
+            _add_with_unsigned_variant(allowed, point.change_percent)
     for event in content.market_data.macro_events:
         for text in (event.actual, event.forecast, event.previous):
             if text:
                 allowed.update(_normalize_decimal(m) for m in _PERCENT_RE.findall(text))
     for fact in content.analysis.facts:
         if fact.value is not None and fact.unit and fact.unit.strip().lower() in _PERCENT_UNIT_ALIASES:
-            allowed.add(_normalize_decimal(fact.value))
+            _add_with_unsigned_variant(allowed, fact.value)
     return allowed
 
 
@@ -147,7 +165,7 @@ def _collect_allowed_bps(content: MasterContent) -> set[str]:
                 allowed.update(_normalize_decimal(m) for m in _BP_RE.findall(text))
     for fact in content.analysis.facts:
         if fact.value is not None and fact.unit and fact.unit.strip().lower() in _BP_UNIT_ALIASES:
-            allowed.add(_normalize_decimal(fact.value))
+            _add_with_unsigned_variant(allowed, fact.value)
     return allowed
 
 

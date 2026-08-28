@@ -13,6 +13,7 @@ from modules.master_content.schema import (
     Analysis,
     ConfidenceLevel,
     Fact,
+    MarketDataPoint,
     MasterContent,
     Source,
     SourceType,
@@ -125,6 +126,28 @@ def test_percent_not_matching_master_content_fails():
 
     assert result.status == FactValidationStatus.FAIL
     assert any("4.75" in item for item in result.unsupported_numbers)
+
+
+def test_negative_index_change_percent_expressed_without_sign_passes():
+    """실제 dry-run 회귀 케이스: market_data.indices의 change_percent가
+    음수(-0.03)일 때, 본문 정규식(`\\d+(?:\\.\\d+)?%`)은 "-" 부호를 애초에
+    캡처하지 못해 "0.03%"처럼 항상 부호 없이 추출된다. 이 값은
+    MasterContent에 실제로 존재하므로(change_percent=-0.03) 근거 없는
+    수치로 잘못 판정되면 안 된다.
+    """
+    content, facts = _content_with_facts()
+    content.market_data.indices = [
+        MarketDataPoint(name="미국 10년물 국채금리", value=4.05, change_percent=-0.03, unit="%"),
+    ]
+    article = _make_article(
+        content_markdown="## 핵심 답변\n국채금리는 전일 대비 0.03%p 하락했다.\n",
+        used_fact_ids=[facts["percent"].id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.PASS
+    assert result.unsupported_numbers == []
 
 
 # ---- 3~4. bp ----
