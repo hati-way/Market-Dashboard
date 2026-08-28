@@ -125,6 +125,17 @@ class Source(BaseModel):
     source_type: SourceType = SourceType.UNKNOWN
 
 
+class InternalLink(BaseModel):
+    """본문에 넣을 수 있는 내부링크 하나(제목+URL 모두 MasterContent에서
+    직접 와야 한다 - wordpress_writer는 이 목록에 없는 링크를 지어내지
+    않는다). 아직 내부링크 자동 추천 시스템은 없으므로, 이 목록이
+    비어 있으면 wordpress_writer는 내부링크를 아예 넣지 않는다.
+    """
+
+    title: str
+    url: str
+
+
 class Analysis(BaseModel):
     """2단계: WordPress/Threads/NotebookLM/YouTube 콘텐츠가 공유하는
     분석의 원본(단일 출처). market_data(원본 시세/이벤트)를 근거로
@@ -135,6 +146,10 @@ class Analysis(BaseModel):
     summary: str = ""
     facts: list[Fact] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
+    # 아직 내부링크 자동 추천 시스템은 없다. 이 목록이 비어 있으면(기본값)
+    # wordpress_writer는 내부링크를 아예 넣지 않는다 - 가짜 URL을 만들지
+    # 않기 위함이다.
+    internal_links: list[InternalLink] = Field(default_factory=list)
     causal_chain: list[str] = Field(default_factory=list)
     market_implications: list[str] = Field(default_factory=list)
     bull_case: list[str] = Field(default_factory=list)

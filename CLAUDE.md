@@ -202,6 +202,33 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       `tests/test_wordpress_oauth_setup.py`(22개, 실제 .env는
       건드리지 않고 tmp_path만 사용).
 - [x] 기본 테스트 스위트
+- [x] **`modules/wordpress_writer` 생성 품질 개선(구조/문체, Fact
+      Grounding·Quality Gate·Publisher는 미변경).** 시스템 프롬프트
+      (`generator.py`의 `_SYSTEM_PROMPT`)를 8섹션 한글 구조로 단순화하고
+      ("Bull case"/"Bear case"/"thesis"/"invalidation" 같은 영어 소제목
+      금지), 인과관계는 화살표로 잇는 단정 대신 조건부 문장으로,
+      confidence=low/secondary 근거는 "일부 시장 참여자는 ~라고 본다"
+      식으로 주체+불확실성을 함께 쓰도록 지침을 추가했다. AI 리포트
+      상투어(“제공된 분석에 따르면” 등) 금지, 분량 목표(1,500~2,500자),
+      제목 가이드(간결하게, 클릭베이트 금지)도 명시했다.
+      `WordPressArticle`에 `seo_title`(선택, 기본 "")을 추가해 화면
+      H1(`title`)과 검색용 title을 분리할 수 있게 하되, 비어 있으면
+      기존처럼 `title`을 그대로 meta title로 쓴다(하위 호환).
+      `_build_source_list()`는 "기관명 — 기준일 — URL" 형태로 출처를
+      만들고(날짜/URL은 항상 MasterContent의 Fact.date/Source.url에서만
+      가져오고 새로 만들지 않음), URL이 없으면 "URL 미제공", 2차
+      출처인데 URL도 없으면 그 한계를 문구로 명시한다. 출처 HTML
+      블록의 URL은 `<a>` 링크로 렌더링해 Quality Gate의 "본문에 링크
+      없음" 권고가 실제 출처로 자연스럽게 해소되게 했다(quality_gate
+      쪽 검사 로직 자체는 손대지 않음). `Analysis.internal_links`
+      (신규, `InternalLink(title, url)` 목록, 기본 빈 목록) 필드를
+      추가해 있으면 "관련 글" 섹션을 만들고, 없으면 내부링크를 전혀
+      만들지 않는다(가짜 URL 금지). 기존 `source_list`/저확신도 관련
+      테스트 2건은 새 출력 형식/문구에 맞춰 값만 갱신했고, Fact
+      Grounding/Quality Gate/Publisher 코드는 전혀 수정하지 않았다.
+      테스트: `tests/test_wordpress_writer_style.py`(17개, 새 스타일
+      규칙 + seo_title + 출처/내부링크 + 기존 Fact Grounding이 새
+      구조에서도 그대로 동작하는지 확인).
 
 다음에 할 일 (권장 순서):
 

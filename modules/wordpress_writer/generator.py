@@ -23,7 +23,15 @@ import re
 from pydantic import ValidationError
 
 from clients.llm_client import LlmClient
-from modules.master_content.schema import MasterContent, SeoMeta, WordPressContent
+from modules.master_content.schema import (
+    Fact,
+    InternalLink,
+    MasterContent,
+    SeoMeta,
+    Source,
+    SourceType,
+    WordPressContent,
+)
 
 from .fact_validation import FactValidationResult, FactValidationStatus, validate_fact_grounding
 from .markdown_html import markdown_to_html
@@ -63,7 +71,10 @@ class FactGroundingError(WordPressGenerationError):
 _JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*\})\s*```", re.DOTALL)
 _DECIMAL_NUMBER_RE = re.compile(r"\d+\.\d+")
 
-_SYSTEM_PROMPT = """당신은 금융/거시경제 리서치 라이터다.
+_SYSTEM_PROMPT = """당신은 "돈맥" 매체의 거시경제 리서치 라이터다.
+목표는 "안전하지만 특징 없는 AI 리포트"가 아니라, 실제 발행 가능한
+거시경제 해석 글이다. 핵심은 단순 뉴스 요약이 아니라 "무엇이 변했고,
+그 변화가 자본 흐름에 어떻게 전달되는가"를 압축적으로 설명하는 것이다.
 
 [가장 중요한 규칙 - Anti-Hallucination]
 제공된 MasterContent만 사실의 근거로 사용한다.
@@ -73,34 +84,94 @@ MasterContent에 없는 숫자, 날짜, 인물 발언, 정책 내용, 시장 가
 
 [문체 규칙]
 - 한국어 존댓말이 아닌 객관적인 리서치 문체를 사용한다.
-- 과도한 클릭베이트, 불필요한 감탄사를 쓰지 않는다.
+- 문장은 짧고 직접적으로 쓴다. 과도한 클릭베이트, 불필요한 감탄사를
+  쓰지 않는다.
 - SEO 키워드를 반복하지 않는다.
-- 전문용어는 첫 등장 시 짧게 설명한다.
+- 전문용어는 첫 등장 시에만 짧게 병기 설명하고(예: "유동성 프리미엄
+  (liquidity premium)"), 이후에는 한국어 용어만 쓴다.
 - 숫자는 가능하면 기준일과 단위를 함께 표기한다.
 - source_type이 primary인 자료를 우선적으로 언급한다.
-- confidence가 low로 표시된 사실은 확정적으로 표현하지 않는다
-  ("~일 수 있다", "~로 보인다" 등으로 표현한다).
-- bull_case와 bear_case를 균형 있게 다룬다.
-- MasterContent에 없는 전망이나 예측을 임의로 만들어내지 않는다.
+- 같은 숫자, 같은 인과관계를 여러 섹션에서 반복하지 않는다. 한 번
+  명확하게 말하고, 다른 섹션에서는 그 위에 새로운 해석을 더한다.
+- 다음과 같은 AI 리포트 특유의 상투어를 쓰지 않는다: "제공된 분석에
+  따르면", "자료에 따르면", "본 분석에서는", "~로 해석될 수 있다"의
+  반복, "~할 필요가 있다"의 반복, "상반된 해석을 동시에 안고 있다",
+  "시장 심리에 긍정적으로 작용할 가능성". 예를 들어 "재무부의 바이백
+  규모 확대는 국채 발행 및 유동성 관리 정책의 방향성을 보여주는
+  신호로 해석될 수 있다" 대신 "중요한 건 바이백 규모 자체보다
+  재무부가 국채 시장의 어느 구간을 지원하려 하는지다"처럼 쓴다.
+
+[사실과 해석의 구분]
+본문 전체에서 다음 네 가지를 명확히 구분해서 쓴다.
+1. 확인된 사실 (MasterContent의 facts/market_data)
+2. 관찰된 시장 반응 (지수/환율 등의 실제 변화)
+3. 해석 (그 사실이 왜 중요한지에 대한 설명)
+4. 시나리오 (앞으로 있을 수 있는 전개, 조건부로만 서술)
+confidence가 low이거나 source_type이 secondary(예: "시장 컨센서스",
+"딜러 서베이")인 내용은 확정적 문장으로 쓰지 않는다. "~로 본다",
+"~일 수 있다", "일부 시장 참여자는 ~라고 본다"처럼 주체와 불확실성을
+함께 표현한다.
+나쁜 예: "바이백 확대는 장기물 발행 부담을 낮춘다."
+좋은 예: "일부 시장 참여자는 바이백 확대가 유동성 프리미엄을 낮춰
+장기물 발행 부담을 완화할 가능성이 있다고 본다."
+
+[인과관계 표현]
+정책/사건이 자산가격에 닿기까지의 경로를 설명할 때는 다음 흐름을
+참고하되, 화살표로 이어붙인 단정적 인과로 쓰지 않는다.
+  정책/사건 → 수급 또는 유동성 변화 → 금리/변동성/리스크 프리미엄
+  변화 가능성 → 자산시장 영향
+나쁜 예("자동적 인과"로 단정): "바이백 확대 → 장기금리 하락 → 주식
+상승."
+좋은 예(조건부 서술): "바이백 확대가 특정 만기의 유동성과 수급을
+개선하면 유동성 프리미엄과 금리 변동성이 완화될 수 있고, 그 경우
+위험자산에는 우호적인 환경이 형성될 수 있다."
+MasterContent의 causal_chain/market_implications는 이 조건부 설명을
+만들 때의 재료로만 쓰고, 그대로 나열하지 않는다.
 
 [본문 구조]
-content_markdown은 마크다운으로 작성한다. 아래 순서를 기본 구조로
-삼되, 해당 주제에 필요 없는 섹션은 억지로 채우지 말고 생략한다. 각
-섹션은 "## 소제목"으로 구분한다.
-1. 핵심 답변 (40~80자, 첫 문단)
-2. 핵심 숫자/사실 (최대 3개, 목록)
-3. 무슨 일이 일어났나
-4. 왜 중요한가
-5. 인과관계
-6. 채권시장 영향
-7. 주식시장 영향
-8. Bull case
-9. Bear case
-10. 주요 리스크
-11. thesis를 무효화할 수 있는 조건
-12. 앞으로 확인해야 할 지표
-13. 핵심 요약
-글 제목(H1)과 출처 목록은 만들지 않는다 (시스템이 별도로 처리한다).
+content_markdown은 마크다운으로 작성한다. 아래 8개 섹션을 기본
+구조로 삼되, 해당 주제에 필요 없는 섹션은 억지로 채우지 말고
+생략한다. 채권시장 영향/주식시장 영향처럼 겹치는 내용은 "시장에
+전달되는 경로" 한 섹션으로 통합해서 쓴다. 각 섹션은 "## 소제목"으로
+구분하고, 아래 한글 소제목을 그대로 쓴다(영어 소제목 금지 — "Bull
+case"/"Bear case"/"thesis"/"invalidation" 같은 표현을 쓰지 않는다).
+1. ## 핵심 답변 (40~80자, 첫 문단. 결론부터 말한다)
+2. ## 무슨 일이 있었나 (확인된 사실 + 관찰된 시장 반응, 핵심 숫자는
+   여기서 한 번만 명시한다)
+3. ## 왜 중요한가
+4. ## 시장에 전달되는 경로 (위 "인과관계 표현" 규칙에 따라 조건부로
+   서술. 채권/주식/환율 등 여러 자산에 걸치면 이 섹션 안에서 함께
+   다룬다)
+5. ## 긍정적으로 볼 수 있는 이유 / ## 반대로 봐야 할 위험 (원래의
+   bull/bear case를 한국어로 쓴다. 둘 다 MasterContent 근거가 있을
+   때만 쓰고, 없으면 생략한다)
+6. ## 이 해석이 틀릴 수 있는 조건 (원래의 invalidating_conditions를
+   한국어로 쓴다)
+7. ## 앞으로 확인할 지표 (원래의 update_triggers)
+8. ## 핵심 요약 (마지막 문단에서, 투자 추천 문체는 피하면서, 가능하면
+   자본이 어디를 보고 있는지 / 시장이 아직 가격에 반영하지 않은 것이
+   무엇인지 / 다음에 확인할 지표가 무엇인지를 연결해서 마무리한다)
+글 제목(H1)과 출처 목록, 내부링크는 만들지 않는다(시스템이 별도로
+처리한다). content_markdown 안에서 "#"(h1)을 쓰지 않고 "##"부터
+시작한다.
+
+[길이]
+전체 분량은 한글 기준 약 1,500~2,500자를 목표로 한다. MasterContent에
+정보가 부족한 주제를 억지로 늘리지 않고, 정보가 많아도 같은 내용을
+반복해서 채우지 않는다.
+
+[제목(title)]
+title은 화면에 보이는 H1이다. 다음을 지킨다.
+- 핵심 키워드를 포함한다.
+- 모바일 화면에서 2~3줄 이상으로 줄바꿈되지 않도록 간결하게 쓴다
+  (한글 기준 대략 45자 이내를 목표로 한다).
+- 질문형 또는 의미를 압축한 형태 모두 가능하다.
+- 클릭베이트(과장된 감탄, 낚시성 표현)를 쓰지 않는다.
+- 예: "미국 국채 바이백 300억 달러 확대, 시장에 어떤 의미일까"
+seo_title은 검색결과에 노출될 title이다. title과 똑같아도 되지만,
+필요하면 핵심 키워드를 조금 더 담아 title과 다르게 쓸 수 있다(예:
+title은 간결하게, seo_title에는 "미국 국채 바이백"과 "장기금리" 같은
+검색 키워드를 함께 포함).
 
 [Fact 인용]
 사용자 메시지의 MasterContent.analysis.facts 각 항목에는 id가 있다
@@ -115,6 +186,7 @@ id는 넣지 않는다. facts 목록에 없는 id를 지어내지 않는다.
 
 {
   "title": string,
+  "seo_title": string,
   "slug": string,
   "excerpt": string,
   "meta_description": string,
@@ -239,6 +311,46 @@ def _check_for_hallucinated_numbers(article: WordPressArticle, content: MasterCo
         )
 
 
+def _source_lookup(content: MasterContent) -> dict[str, Source]:
+    return {source.name: source for source in content.analysis.sources}
+
+
+def _format_source_entry(
+    name: str, url: str | None, as_of: str | None, source_type: SourceType
+) -> str:
+    """출처 하나를 "기관명 — 기준일 — URL" 형태로 만든다.
+
+    URL이 MasterContent에 없으면(fact/Source 어디에도 없으면) 임의로
+    만들지 않고 "URL 미제공"으로만 표시한다. 2차 출처(secondary)이면서
+    URL도 없는 경우(예: "시장 컨센서스", "딜러 서베이")는 원자료를
+    확인할 수 없다는 한계를 문구로 명시한다.
+    """
+    parts = [name]
+    if as_of:
+        parts.append(as_of)
+    parts.append(url if url else "URL 미제공")
+    entry = " — ".join(parts)
+    if not url and source_type in (SourceType.SECONDARY, SourceType.UNKNOWN):
+        entry += " (2차 출처, 원자료 URL 미확인)"
+    return entry
+
+
+def _entry_for_fact(fact: Fact, lookup: dict[str, Source]) -> str:
+    """fact.source 이름으로 analysis.sources에서 URL/source_type을 찾아
+    쓰고(있으면), 없으면 fact 자체의 source_type만으로 표시한다. 둘 다
+    MasterContent 안의 값만 쓴다 - URL을 새로 만들지 않는다.
+    """
+    matched = lookup.get(fact.source)
+    url = matched.url if matched else None
+    source_type = matched.source_type if matched else fact.source_type
+    as_of = fact.date.isoformat() if fact.date else None
+    return _format_source_entry(fact.source, url, as_of, source_type)
+
+
+def _entry_for_source(source: Source) -> str:
+    return _format_source_entry(source.name, source.url, as_of=None, source_type=source.source_type)
+
+
 def _build_source_list(content: MasterContent, used_fact_ids: list[str] | None = None) -> list[str]:
     """LLM이 아니라 MasterContent.analysis에서 직접 만든 출처 목록.
 
@@ -250,35 +362,72 @@ def _build_source_list(content: MasterContent, used_fact_ids: list[str] | None =
     """
     entries: list[str] = []
     seen: set[str] = set()
+    lookup = _source_lookup(content)
 
-    def add(label: str | None) -> None:
-        if label and label not in seen:
-            seen.add(label)
-            entries.append(label)
+    def add(entry: str | None) -> None:
+        if entry and entry not in seen:
+            seen.add(entry)
+            entries.append(entry)
 
     if used_fact_ids:
         fact_by_id = {fact.id: fact for fact in content.analysis.facts if fact.id}
         for fact_id in used_fact_ids:
             fact = fact_by_id.get(fact_id)
             if fact:
-                add(fact.source)
+                add(_entry_for_fact(fact, lookup))
 
     if not entries:
         for source in content.analysis.sources:
-            add(f"{source.name} ({source.url})" if source.url else source.name)
+            add(_entry_for_source(source))
 
     if not entries:
         for fact in content.analysis.facts:
-            add(fact.source)
+            add(_entry_for_fact(fact, lookup))
 
     return entries
+
+
+_URL_IN_TEXT_RE = re.compile(r"https?://\S+")
+
+
+def _linkify_source_entry(entry: str) -> str:
+    """출처 문자열 안에 이미 있는 URL(있다면)만 <a> 태그로 바꾼다.
+
+    URL을 새로 만들지 않는다 - _build_source_list()가 만든 문자열
+    (예: "기관명 — 기준일 — https://...")에 실제로 포함된 URL만 찾아
+    그 부분만 링크로 바꾸고, 나머지 텍스트는 그대로 이스케이프한다.
+    URL이 없으면(예: "URL 미제공") 전체를 이스케이프만 한다.
+    """
+    match = _URL_IN_TEXT_RE.search(entry)
+    if not match:
+        return html.escape(entry)
+    url = match.group(0)
+    before = html.escape(entry[: match.start()])
+    after = html.escape(entry[match.end() :])
+    link = f'<a href="{html.escape(url)}" rel="nofollow noopener" target="_blank">{html.escape(url)}</a>'
+    return before + link + after
 
 
 def _render_sources_html(source_list: list[str]) -> str:
     if not source_list:
         return ""
-    items = "".join(f"<li>{html.escape(s)}</li>" for s in source_list)
+    items = "".join(f"<li>{_linkify_source_entry(s)}</li>" for s in source_list)
     return f"<h2>출처</h2>\n<ul>{items}</ul>"
+
+
+def _render_internal_links_html(internal_links: list[InternalLink]) -> str:
+    """MasterContent.analysis.internal_links가 있을 때만 내부링크 섹션을
+    만든다. 아직 내부링크 자동 추천 시스템이 없으므로, 이 목록이
+    비어 있으면(기본값) 아무것도 만들지 않는다 - 가짜 링크를 넣지
+    않기 위함이다.
+    """
+    if not internal_links:
+        return ""
+    items = "".join(
+        f'<li><a href="{html.escape(link.url)}">{html.escape(link.title)}</a></li>'
+        for link in internal_links
+    )
+    return f"<h2>관련 글</h2>\n<ul>{items}</ul>"
 
 
 def generate_wordpress_content(
@@ -320,7 +469,12 @@ def generate_wordpress_content(
 
     body_html = markdown_to_html(article.content_markdown)
     sources_html = _render_sources_html(article.source_list)
-    article.content_html = body_html + ("\n" + sources_html if sources_html else "")
+    internal_links_html = _render_internal_links_html(content.analysis.internal_links)
+    article.content_html = (
+        body_html
+        + ("\n" + sources_html if sources_html else "")
+        + ("\n" + internal_links_html if internal_links_html else "")
+    )
 
     content.wordpress = WordPressContent(
         title=article.title,
@@ -335,7 +489,8 @@ def generate_wordpress_content(
         fact_validation_warnings=fact_result.warnings,
         used_fact_ids=fact_result.used_fact_ids,
         seo=SeoMeta(
-            meta_title=article.title,
+            # seo_title이 비어 있으면(기존 동작과 호환) title을 그대로 쓴다.
+            meta_title=article.seo_title or article.title,
             meta_description=article.meta_description,
             focus_keyword=article.primary_keyword,
         ),

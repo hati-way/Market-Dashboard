@@ -337,11 +337,14 @@ def test_source_list_prioritizes_used_fact_sources():
 
     result_content = generate_wordpress_content(content, llm_client=fake_client)
 
-    # percent/bp fact는 둘 다 source="Federal Reserve" 이므로 중복 제거되어
-    # 하나만 남고, analysis.sources(Bloomberg/Reuters)는 쓰이지 않아야 한다.
-    assert result_content.wordpress.source_list == ["Federal Reserve"]
-    assert "Bloomberg" not in result_content.wordpress.source_list
-    assert "Reuters" not in result_content.wordpress.source_list
+    # percent/bp fact는 둘 다 source="Federal Reserve"이고 date도 같으므로
+    # (기관명+기준일+URL로 만든 문자열이 완전히 같아) 중복 제거되어 하나만
+    # 남고, analysis.sources(Bloomberg/Reuters)는 쓰이지 않아야 한다.
+    # analysis.sources에 "Federal Reserve"라는 이름의 Source가 없어 URL을
+    # 찾지 못하므로 "URL 미제공"으로 표시된다(URL을 임의로 만들지 않는다).
+    assert result_content.wordpress.source_list == ["Federal Reserve — 2026-08-26 — URL 미제공"]
+    assert not any("Bloomberg" in s for s in result_content.wordpress.source_list)
+    assert not any("Reuters" in s for s in result_content.wordpress.source_list)
     assert result_content.wordpress.fact_validation_status == "PASS"
 
 

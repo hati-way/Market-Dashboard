@@ -20,7 +20,12 @@ def _now_iso() -> str:
 
 
 class WordPressArticle(BaseModel):
+    # title은 화면 H1(WordPress post title)이다. seo_title이 비어 있으면
+    # meta title(검색결과 노출용)도 title을 그대로 쓴다 - 기존 동작과
+    # 호환된다. seo_title을 채우면 H1과 검색용 title을 분리할 수 있다
+    # (예: H1은 간결하게, seo_title에 키워드를 더 담기).
     title: str
+    seo_title: str = ""
     slug: str
     excerpt: str
     meta_description: str

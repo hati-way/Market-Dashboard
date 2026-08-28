@@ -159,9 +159,11 @@ def test_source_list_is_built_from_master_content_not_llm():
 
     result = generate_wordpress_content(content, llm_client=fake_client)
 
+    # source_list는 "기관명 — 기준일 — URL" 형태다. URL이 없으면(BEA) 임의로
+    # 만들지 않고 "URL 미제공"으로 표시한다.
     assert result.wordpress.source_list == [
-        "Fed (https://www.federalreserve.gov)",
-        "U.S. Bureau of Economic Analysis",
+        "Fed — https://www.federalreserve.gov",
+        "U.S. Bureau of Economic Analysis — URL 미제공",
     ]
     assert "LLM이 지어낸 가짜 출처" not in result.wordpress.source_list
     assert "출처" in result.wordpress.content_html
@@ -220,7 +222,7 @@ def test_low_confidence_fact_is_passed_to_prompt():
     assert "다음 FOMC에서 금리가 인하될 가능성이 있다." in prompt
     # 시스템 프롬프트에 낮은 확신도 사실을 확정적으로 쓰지 말라는 지침이 있는지도 확인한다.
     assert fake_client.calls[0]["system_prompt"] is not None
-    assert "확정적으로 표현하지 않는다" in fake_client.calls[0]["system_prompt"]
+    assert "확정적 문장으로 쓰지 않는다" in fake_client.calls[0]["system_prompt"]
 
 
 # ---- 8. MasterContent에 없는 값을 LLM 응답이 포함했을 때 탐지/차단 ----
