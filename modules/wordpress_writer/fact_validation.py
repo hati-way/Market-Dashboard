@@ -23,6 +23,12 @@ from pydantic import BaseModel, Field
 
 from modules.master_content.schema import ConfidenceLevel, Fact, MasterContent
 
+from .currency_scale import (
+    ScaledAmount,
+    classify_scaled_amount,
+    find_scaled_amounts,
+    scaled_amount_from_value_unit,
+)
 from .models import WordPressArticle
 
 
@@ -47,10 +53,6 @@ _PERCENT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 _BP_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*(?:bps|bp|basis\s+points?)(?![a-zA-Z])", re.IGNORECASE
 )
-_DOLLAR_SCALE_RE = re.compile(
-    r"\$\s*(\d+(?:\.\d+)?)\s*(billion|million|trillion)\b", re.IGNORECASE
-)
-_KOREAN_SCALE_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(억|조)\s*(?:달러|원)?")
 _ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 _KOREAN_FULL_DATE_RE = re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일")
 _KOREAN_MONTH_DAY_RE = re.compile(r"(\d{1,2})월\s*(\d{1,2})일")
@@ -61,7 +63,6 @@ _LEADING_MARKER_RE = re.compile(r"^\s*(?:[-*]\s+|\d+\.\s+|#{1,3}\s+)")
 
 _PERCENT_UNIT_ALIASES = {"%", "percent", "퍼센트", "pct"}
 _BP_UNIT_ALIASES = {"bp", "bps", "basis point", "basis points"}
-_SCALE_UNIT_ALIASES = ("billion", "million", "trillion", "억", "조")
 
 
 def _strip_structural_markers(markdown_text: str) -> str:
@@ -111,7 +112,7 @@ def _looks_like_it_has_concrete_facts(markdown_text: str) -> bool:
     text = _strip_structural_markers(markdown_text)
     if _PERCENT_RE.search(text) or _BP_RE.search(text):
         return True
-    if _DOLLAR_SCALE_RE.search(text) or _KOREAN_SCALE_RE.search(text):
+    if find_scaled_amounts(text):
         return True
     full_dates, partial_dates = _find_dates(text)
     return bool(full_dates or partial_dates)
@@ -169,16 +170,27 @@ def _collect_allowed_bps(content: MasterContent) -> set[str]:
     return allowed
 
 
-def _collect_allowed_currency_amounts(content: MasterContent) -> set[tuple[str, str]]:
-    """(수치, 단위규모) 쌍의 집합. 예: ("4", "billion")."""
-    allowed: set[tuple[str, str]] = set()
+def _collect_allowed_scaled_amounts(content: MasterContent) -> list[ScaledAmount]:
+    """MasterContent 안에 실제로 존재하는 금액(만/억/조/million/billion/
+    trillion 단위)들을 ScaledAmount 목록으로 모은다.
+
+    facts(구조화된 value/unit)뿐 아니라 macro_events.actual/forecast/
+    previous(자유 텍스트)도 함께 스캔한다 - "280억 달러", "250억~300억
+    달러 규모"처럼 발표치 자체가 아닌 이전치/예상치도 자유 텍스트로만
+    존재하는 경우가 많기 때문이다(퍼센트/bp 허용 목록은 이미 macro_events
+    를 스캔하고 있었는데, 금액만 빠져 있던 것이 실제 오탐의 원인이었다).
+    """
+    allowed: list[ScaledAmount] = []
     for fact in content.analysis.facts:
         if fact.value is None or not fact.unit:
             continue
-        unit_lower = fact.unit.lower()
-        for scale in _SCALE_UNIT_ALIASES:
-            if scale in unit_lower or scale in fact.unit:
-                allowed.add((_normalize_decimal(fact.value), scale.lower()))
+        amount = scaled_amount_from_value_unit(fact.value, fact.unit)
+        if amount is not None:
+            allowed.append(amount)
+    for event in content.market_data.macro_events:
+        for text in (event.actual, event.forecast, event.previous):
+            if text:
+                allowed.extend(find_scaled_amounts(text))
     return allowed
 
 
@@ -207,12 +219,20 @@ def _collect_allowed_dates(content: MasterContent) -> set[date]:
 # ---- 본문 검증 ----
 
 
-def _check_numeric_grounding(content_markdown: str, content: MasterContent) -> list[str]:
+def _check_numeric_grounding(
+    content_markdown: str, content: MasterContent
+) -> tuple[list[str], list[str]]:
     """content_markdown 안의 퍼센트/bp/금액/날짜가 MasterContent에 실제로
-    있는지 확인하고, 근거 없는 항목의 설명 문자열 목록을 돌려준다.
+    있는지 확인한다.
+
+    반환값은 (근거 없는 항목 설명 목록, 통화가 불명확해 확인이 필요한
+    항목 설명 목록)이다. 전자는 FAIL로 이어지고, 후자는 REVIEW_REQUIRED로
+    이어진다(단정할 수 없는 것을 FAIL로 막지 않되, 그렇다고 조용히
+    PASS시키지도 않는다).
     """
     text = _strip_structural_markers(content_markdown)
     unsupported: list[str] = []
+    review_notes: list[str] = []
 
     allowed_percents = _collect_allowed_percents(content)
     for m in _PERCENT_RE.finditer(text):
@@ -224,15 +244,16 @@ def _check_numeric_grounding(content_markdown: str, content: MasterContent) -> l
         if _normalize_decimal(m.group(1)) not in allowed_bps:
             unsupported.append(f"{m.group(0).strip()} (MasterContent에 없는 bp 수치)")
 
-    allowed_currency = _collect_allowed_currency_amounts(content)
-    for m in _DOLLAR_SCALE_RE.finditer(text):
-        key = (_normalize_decimal(m.group(1)), m.group(2).lower())
-        if key not in allowed_currency:
-            unsupported.append(f"{m.group(0).strip()} (MasterContent에 없는 금액)")
-    for m in _KOREAN_SCALE_RE.finditer(text):
-        key = (_normalize_decimal(m.group(1)), m.group(2).lower())
-        if key not in allowed_currency:
-            unsupported.append(f"{m.group(0).strip()} (MasterContent에 없는 금액)")
+    allowed_amounts = _collect_allowed_scaled_amounts(content)
+    for amount in find_scaled_amounts(text):
+        classification = classify_scaled_amount(amount, allowed_amounts)
+        if classification == "unsupported":
+            unsupported.append(f"{amount.matched_text} (MasterContent에 없는 금액)")
+        elif classification == "review":
+            review_notes.append(
+                f"{amount.matched_text} - 통화가 본문에 명시되지 않아 MasterContent 안의 "
+                "여러 통화 중 무엇을 가리키는지 확인이 필요합니다."
+            )
 
     allowed_dates = _collect_allowed_dates(content)
     full_dates, partial_dates = _find_dates(text)
@@ -243,7 +264,7 @@ def _check_numeric_grounding(content_markdown: str, content: MasterContent) -> l
         if not any(d.month == month and d.day == day for d in allowed_dates):
             unsupported.append(f"{month}월 {day}일 (MasterContent에 없는 날짜)")
 
-    return unsupported
+    return unsupported, review_notes
 
 
 def validate_fact_grounding(article: WordPressArticle, content: MasterContent) -> FactValidationResult:
@@ -267,9 +288,11 @@ def validate_fact_grounding(article: WordPressArticle, content: MasterContent) -
         for fact_id in invalid_fact_ids
     ]
 
-    unsupported_numbers = _check_numeric_grounding(article.content_markdown, content)
+    unsupported_numbers, currency_review_notes = _check_numeric_grounding(
+        article.content_markdown, content
+    )
 
-    warnings: list[str] = []
+    warnings: list[str] = list(currency_review_notes)
     if not article.used_fact_ids and _looks_like_it_has_concrete_facts(article.content_markdown):
         warnings.append(
             "used_fact_ids가 비어 있지만 본문에 구체적인 수치/날짜 표현이 있습니다. "

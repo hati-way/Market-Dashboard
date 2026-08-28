@@ -343,3 +343,197 @@ def test_source_list_prioritizes_used_fact_sources():
     assert "Bloomberg" not in result_content.wordpress.source_list
     assert "Reuters" not in result_content.wordpress.source_list
     assert result_content.wordpress.fact_validation_status == "PASS"
+
+
+# ---- 14~20. 통화 스케일 정규화(만/억/조 ↔ million/billion/trillion) ----
+# 실제 dry-run 회귀 케이스: sample_treasury_buyback.json의 macro_events
+# (previous="280억 달러 규모", forecast="250억~300억 달러 규모")에서 나온
+# "280억 달러"/"250억"이, 실제로 MasterContent 안에 있는 값인데도
+# FactGroundingError로 잘못 막혔다. 원인은 두 가지였다: (1) 금액 허용
+# 목록이 facts만 스캔하고 macro_events는 스캔하지 않았고, (2) million/
+# billion/trillion ↔ 만/억/조 단위 등가 변환이 아예 없었다.
+
+
+def _content_with_amount_fact(value: float, unit: str) -> tuple[MasterContent, Fact]:
+    market_data = load_market_data_from_json_file(SAMPLE_INPUT)
+    content = build_master_content(topic="통화 스케일 테스트", market_data=market_data)
+    fact = Fact(
+        claim=f"프로그램 규모가 {value} {unit}로 발표되었다.",
+        value=value,
+        unit=unit,
+        date="2026-08-26",
+        source="Test Source",
+        source_type=SourceType.PRIMARY,
+        confidence=ConfidenceLevel.HIGH,
+    )
+    content.analysis = Analysis(facts=[fact], sources=[Source(name="Test Source")])
+    return content, content.analysis.facts[0]
+
+
+def test_billion_usd_matches_eok_dollar_equivalent():
+    """28 billion USD -> 280억 달러 = PASS."""
+    content, fact = _content_with_amount_fact(28, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 280억 달러로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.PASS
+    assert result.unsupported_numbers == []
+
+
+def test_25_billion_usd_matches_250eok_dollar_equivalent():
+    """25 billion USD -> 250억 달러 = PASS."""
+    content, fact = _content_with_amount_fact(25, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 250억 달러로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.PASS
+
+
+def test_billion_usd_does_not_match_eok_won_same_magnitude():
+    """28 billion USD -> 280억 원 = FAIL (통화가 다르면 raw_value가 같아도 임의 환산하지 않는다)."""
+    content, fact = _content_with_amount_fact(28, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 280억 원으로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.FAIL
+    assert any("280억 원" in item for item in result.unsupported_numbers)
+
+
+def test_billion_usd_does_not_match_wrong_magnitude():
+    """28 billion USD -> 300억 달러 = FAIL (통화는 맞지만 금액 자체가 근거와 다름)."""
+    content, fact = _content_with_amount_fact(28, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 300억 달러로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.FAIL
+    assert any("300억 달러" in item for item in result.unsupported_numbers)
+
+
+def test_fractional_billion_usd_matches_eok_dollar_equivalent():
+    """1.5 billion USD -> 15억 달러 = PASS."""
+    content, fact = _content_with_amount_fact(1.5, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 15억 달러로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.PASS
+
+
+def test_ungrounded_decimal_number_still_fails_with_currency_scale_helper():
+    """근거 없는 650.12는 통화 스케일 정규화 도입 이후에도 여전히 근거 없는 값으로
+    남아 있어야 한다(만/억/조/million/billion/trillion 단위가 없으므로 통화 스케일
+    검사 대상이 아니고, 이 값 자체는 HallucinationDetectedError의 1차 방어선
+    담당이다 - 여기서는 통화 검사가 이 값을 잘못 통과시키지 않는지만 확인한다)."""
+    content, fact = _content_with_amount_fact(28, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n관련 국채 선물 가격은 650.12를 나타냈다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert not any("650.12" in item for item in result.unsupported_numbers)
+
+
+def test_currency_omitted_amount_passes_when_context_is_unambiguous():
+    """통화가 생략된 "250억"도, MasterContent 전체에 통화 후보가 달러 하나뿐이면
+    문맥상 명확하므로 PASS해야 한다(REVIEW_REQUIRED로 보내지 않는다)."""
+    content, fact = _content_with_amount_fact(25, "billion USD")
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 250억으로 발표되었다.\n",
+        used_fact_ids=[fact.id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.PASS
+    assert result.warnings == []
+
+
+def test_currency_omitted_amount_triggers_review_required_when_ambiguous():
+    """같은 raw_value를 서로 다른 통화(달러/원)로 나타내는 근거가 둘 다 있으면,
+    통화가 생략된 언급은 어느 쪽인지 확정할 수 없으므로 PASS가 아니라
+    REVIEW_REQUIRED로 보내야 한다(FAIL로 막지도 않는다)."""
+    market_data = load_market_data_from_json_file(SAMPLE_INPUT)
+    content = build_master_content(topic="통화 스케일 테스트(모호)", market_data=market_data)
+    usd_fact = Fact(
+        claim="달러 표시 프로그램 규모가 250억 달러였다.",
+        value=25,
+        unit="billion USD",
+        date="2026-08-26",
+        source="Test Source A",
+        source_type=SourceType.PRIMARY,
+        confidence=ConfidenceLevel.HIGH,
+    )
+    krw_fact = Fact(
+        claim="원화 표시 프로그램 규모가 250억 원이었다.",
+        value=25,
+        unit="billion 원",
+        date="2026-08-26",
+        source="Test Source B",
+        source_type=SourceType.PRIMARY,
+        confidence=ConfidenceLevel.HIGH,
+    )
+    content.analysis = Analysis(
+        facts=[usd_fact, krw_fact],
+        sources=[Source(name="Test Source A"), Source(name="Test Source B")],
+    )
+    article = _make_article(
+        content_markdown="## 핵심 답변\n이번 프로그램 규모는 250억으로 발표되었다.\n",
+        used_fact_ids=[content.analysis.facts[0].id, content.analysis.facts[1].id],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status == FactValidationStatus.REVIEW_REQUIRED
+    assert result.unsupported_numbers == []
+    assert any("250억" in item for item in result.warnings)
+
+
+def test_treasury_buyback_fixture_macro_event_amounts_are_grounded():
+    """실제 dry-run 회귀 케이스 재현: sample_treasury_buyback.json의
+    macro_events(previous="280억 달러 규모", forecast="250억~300억 달러
+    규모")에서 나온 "280억 달러"/"250억"/"300억 달러"를 본문이 그대로
+    인용해도 더 이상 FactGroundingError가 발생하지 않아야 한다.
+    """
+    from modules.data_ingest.ingest import load_market_content_input_from_json_file
+
+    input_data = load_market_content_input_from_json_file(
+        "data/input/sample_treasury_buyback.json"
+    )
+    content = build_master_content(
+        topic=input_data.topic, market_data=input_data.market_data, analysis=input_data.analysis
+    )
+    article = _make_article(
+        content_markdown=(
+            "## 핵심 답변\n"
+            "재무부는 이번 분기 바이백 규모를 300억 달러로 발표했다. 이는 시장 "
+            "예상치인 250억~300억 달러 범위 상단이었고, 직전 분기의 280억 달러보다 "
+            "늘어난 규모다.\n"
+        ),
+        used_fact_ids=["fact_001"],
+    )
+
+    result = validate_fact_grounding(article, content)
+
+    assert result.status in (FactValidationStatus.PASS, FactValidationStatus.REVIEW_REQUIRED)
+    assert result.unsupported_numbers == []
