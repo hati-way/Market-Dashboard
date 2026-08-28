@@ -71,9 +71,13 @@ def get_settings() -> Settings:
     if existing_post_policy not in ("skip", "draft_update"):
         existing_post_policy = "skip"
 
+    # 값이 아예 비어 있으면 기본값(app_password)을 쓰지만, 뭔가 적혀
+    # 있는데 오타 등으로 알아볼 수 없는 값이면 여기서 조용히
+    # app_password로 바꿔치기하지 않는다 — 그러면 사용자가 실제로는
+    # wordpress_com_oauth2를 쓰려고 했는데 엉뚱하게 "WORDPRESS_URL이
+    # 없다"는 오류를 보게 된다. 검증은 clients/wordpress_client.py가
+    # 실제로 클라이언트를 생성하는 시점에 한다.
     auth_mode = (os.getenv("WORDPRESS_AUTH_MODE") or "app_password").strip().lower()
-    if auth_mode not in ("app_password", "wordpress_com_oauth2"):
-        auth_mode = "app_password"
 
     return Settings(
         app_env=os.getenv("APP_ENV", "development"),

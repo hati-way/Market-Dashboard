@@ -245,14 +245,80 @@ def test_wordpress_com_oauth2_missing_access_token_raises_config_error(monkeypat
         WordPressClient()
 
 
-def test_wordpress_com_oauth2_unknown_auth_mode_falls_back_to_app_password(monkeypatch):
-    # 오타 등 알 수 없는 값은 안전하게 app_password로 취급한다.
+def test_unknown_auth_mode_raises_config_error_instead_of_silently_falling_back(monkeypatch):
+    # 예전 버그: 오타 등 알 수 없는 값을 조용히 app_password로 취급해서,
+    # 사용자가 실제로는 wordpress_com_oauth2를 쓰려고 했는데
+    # "WORDPRESS_URL이 없다"는 엉뚱한 오류를 보게 됐다. 지금은 auth mode
+    # 자체가 잘못됐다고 명확히 실패해야 한다.
     monkeypatch.setenv("WORDPRESS_AUTH_MODE", "something-unknown")
     _set_wordpress_env(monkeypatch)
+
+    with pytest.raises(WordPressConfigError, match="WORDPRESS_AUTH_MODE"):
+        WordPressClient()
+
+
+def test_regression_oauth2_typo_reports_auth_mode_error_not_missing_url(monkeypatch):
+    """실제로 보고된 버그를 그대로 재현한다.
+
+    WORDPRESS_AUTH_MODE에 "wordpress_com_oauth2"를 "wordpress_com_oauth"로
+    오타를 내고, SITE_ID/ACCESS_TOKEN은 채웠고, WORDPRESS_URL은 아예
+    없는 상태. 예전에는 이 오타 값이 조용히 app_password로 취급되어
+    "WORDPRESS_URL이 설정되지 않았습니다"라는 엉뚱한 오류가 났다. 지금은
+    WORDPRESS_AUTH_MODE 값 자체가 잘못됐다는 오류가 나야 하고,
+    WORDPRESS_URL 관련 오류가 나면 안 된다.
+    """
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "wordpress_com_oauth")  # 오타: 끝의 "2" 누락
+    monkeypatch.setenv("WORDPRESS_COM_SITE_ID", "example.wordpress.com")
+    monkeypatch.setenv("WORDPRESS_COM_ACCESS_TOKEN", "token")
+    monkeypatch.delenv("WORDPRESS_URL", raising=False)
+    monkeypatch.delenv("WORDPRESS_USERNAME", raising=False)
+    monkeypatch.delenv("WORDPRESS_APP_PASSWORD", raising=False)
+
+    with pytest.raises(WordPressConfigError) as exc_info:
+        WordPressClient()
+
+    message = str(exc_info.value)
+    assert "WORDPRESS_AUTH_MODE" in message
+    assert "WORDPRESS_URL" not in message
+
+
+def test_wordpress_com_oauth2_mode_does_not_require_wordpress_url(monkeypatch):
+    """OAuth2 모드에서는 WORDPRESS_URL이 아예 없어도 정상 동작해야 한다."""
+    _set_wordpress_com_oauth2_env(monkeypatch)
+    monkeypatch.delenv("WORDPRESS_URL", raising=False)
+    monkeypatch.delenv("WORDPRESS_USERNAME", raising=False)
+    monkeypatch.delenv("WORDPRESS_APP_PASSWORD", raising=False)
+
+    client = WordPressClient()
+
+    assert client._auth_mode == "wordpress_com_oauth2"
+
+
+def test_app_password_mode_does_not_require_wordpress_com_settings(monkeypatch):
+    """app_password 모드에서는 WordPress.com 전용 값이 없어도 정상 동작해야 한다."""
+    monkeypatch.setenv("WORDPRESS_AUTH_MODE", "app_password")
+    _set_wordpress_env(monkeypatch)
+    monkeypatch.delenv("WORDPRESS_COM_SITE_ID", raising=False)
+    monkeypatch.delenv("WORDPRESS_COM_ACCESS_TOKEN", raising=False)
 
     client = WordPressClient()
 
     assert client._auth_mode == "app_password"
+
+
+def test_wordpress_test_uses_bearer_auth_when_oauth2_mode_configured(monkeypatch):
+    """--wordpress-test(test_connection)가 현재 auth mode에 맞는 인증을 쓰는지 확인한다."""
+    _set_wordpress_com_oauth2_env(monkeypatch)
+    monkeypatch.delenv("WORDPRESS_URL", raising=False)
+
+    with patch("clients.wordpress_client.requests.request") as mock_request:
+        mock_request.return_value = _fake_response(200, {"id": 1, "name": "Admin"})
+        client = WordPressClient()
+        client.test_connection()
+
+        _, kwargs = mock_request.call_args
+        assert "auth" not in kwargs or kwargs["auth"] is None
+        assert kwargs["headers"]["Authorization"].startswith("Bearer ")
 
 
 def test_wordpress_com_oauth2_builds_correct_url_and_uses_bearer_auth(monkeypatch):

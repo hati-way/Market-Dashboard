@@ -49,7 +49,8 @@ class WordPressClientError(Exception):
 
 
 class WordPressConfigError(WordPressClientError):
-    """인증 방식별 필수 설정이 없을 때 발생한다.
+    """WORDPRESS_AUTH_MODE 값이 알아볼 수 없거나, 선택된 인증 방식에
+    필요한 설정이 없을 때 발생한다.
 
     (app_password: WORDPRESS_URL/USERNAME/APP_PASSWORD,
      wordpress_com_oauth2: WORDPRESS_COM_SITE_ID/ACCESS_TOKEN)
@@ -95,7 +96,7 @@ class WordPressClient:
             site_id = settings.wordpress_com_site_id.strip().strip("/")
             self._base_url = f"{_WORDPRESS_COM_API_ROOT}/wp/v2/sites/{site_id}"
             self._bearer_token = settings.wordpress_com_access_token
-        else:
+        elif self._auth_mode == AUTH_MODE_APP_PASSWORD:
             if not settings.wordpress_url:
                 raise WordPressConfigError(
                     "WORDPRESS_URL이 설정되지 않았습니다. .env 파일에 값을 채워주세요."
@@ -108,6 +109,15 @@ class WordPressClient:
             # 끝의 슬래시를 제거해 /wp-json 이 중복되지 않게 한다.
             self._base_url = settings.wordpress_url.rstrip("/")
             self._auth = (settings.wordpress_username, settings.wordpress_app_password)
+        else:
+            # 오타 등으로 app_password/wordpress_com_oauth2 둘 다 아닌 값이
+            # 들어온 경우. 예전에는 이런 값을 조용히 app_password로 취급해서
+            # "WORDPRESS_URL이 없다"는 엉뚱한 오류가 났었다 — 지금은 어떤
+            # 값이 잘못됐는지 바로 알 수 있게 명확히 실패시킨다.
+            raise WordPressConfigError(
+                f"WORDPRESS_AUTH_MODE 값이 올바르지 않습니다: '{self._auth_mode}' "
+                f"(허용값: '{AUTH_MODE_APP_PASSWORD}' 또는 '{AUTH_MODE_WORDPRESS_COM_OAUTH2}')."
+            )
 
         self._max_retries = max_retries if max_retries is not None else settings.wordpress_max_retries
         self._timeout = timeout if timeout is not None else settings.wordpress_timeout_seconds
