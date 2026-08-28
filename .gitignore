@@ -5,6 +5,8 @@ __pycache__/
 venv/
 env/
 .env
+# python main.py --wordpress-oauth-setup 이 갱신 전에 만드는 백업 파일
+.env.bak*
 
 # 생성되는 콘텐츠(민감/대용량일 수 있으므로 기본적으로 커밋하지 않음)
 data/master/*

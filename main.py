@@ -3,6 +3,12 @@
 사용 예:
     python main.py --topic "미국 증시 브리핑" --input data/input/sample_market_data.json
 
+WordPress.com OAuth2 access token이 아직 없다면 먼저:
+    python main.py --wordpress-oauth-setup
+(.env의 WORDPRESS_COM_CLIENT_ID/CLIENT_SECRET/REDIRECT_URI/SITE_ID 가
+채워져 있어야 하며, curl을 직접 만들 필요 없이 브라우저 인가 → code
+붙여넣기 → access token 발급까지 대화형으로 진행한다.)
+
 WordPress 연동은 항상 안전한 순서로 확인한다.
     1) 연결만 확인:      python main.py --wordpress-test
     2) dry-run으로 확인: python main.py --topic "테스트" --publish --dry-run
@@ -16,6 +22,7 @@ import argparse
 import logging
 
 from clients.wordpress_client import WordPressClient, WordPressClientError
+from clients.wordpress_oauth_setup import run_oauth_setup
 from config.settings import get_settings
 from pipeline.orchestrator import run_pipeline
 
@@ -44,6 +51,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="다른 작업 없이 WordPress 연결(인증정보)만 확인하고 종료한다.",
     )
+    parser.add_argument(
+        "--wordpress-oauth-setup",
+        action="store_true",
+        help="WordPress.com OAuth2 access token 발급을 대화형으로 진행하고 "
+        ".env에 저장한 뒤 종료한다 (curl을 직접 만들 필요 없음).",
+    )
     return parser.parse_args()
 
 
@@ -64,6 +77,10 @@ def main() -> None:
     logging.basicConfig(level=settings.log_level)
 
     args = parse_args()
+
+    if args.wordpress_oauth_setup:
+        succeeded = run_oauth_setup()
+        raise SystemExit(0 if succeeded else 1)
 
     if args.wordpress_test:
         _run_wordpress_connection_test()

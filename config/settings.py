@@ -38,6 +38,12 @@ class Settings:
     # wordpress_auth_mode="wordpress_com_oauth2" 일 때만 사용.
     wordpress_com_site_id: str | None
     wordpress_com_access_token: str | None
+    # 아래 세 값은 clients/wordpress_oauth_setup.py(--wordpress-oauth-setup)
+    # 에서 access token을 처음 발급받을 때만 필요하다. WordPressClient
+    # 자체는 발급이 끝난 wordpress_com_access_token만 사용한다.
+    wordpress_com_client_id: str | None
+    wordpress_com_client_secret: str | None
+    wordpress_com_redirect_uri: str | None
     # 아래 두 값의 기본값은 반드시 True로 유지한다. 운영자가 .env에서
     # 의도적으로 false로 바꾸기 전에는 자동으로 공개 발행되지 않아야 한다.
     wordpress_dry_run: bool
@@ -78,6 +84,9 @@ def get_settings() -> Settings:
         wordpress_app_password=os.getenv("WORDPRESS_APP_PASSWORD") or None,
         wordpress_com_site_id=os.getenv("WORDPRESS_COM_SITE_ID") or None,
         wordpress_com_access_token=os.getenv("WORDPRESS_COM_ACCESS_TOKEN") or None,
+        wordpress_com_client_id=os.getenv("WORDPRESS_COM_CLIENT_ID") or None,
+        wordpress_com_client_secret=os.getenv("WORDPRESS_COM_CLIENT_SECRET") or None,
+        wordpress_com_redirect_uri=os.getenv("WORDPRESS_COM_REDIRECT_URI") or None,
         wordpress_dry_run=_parse_bool(os.getenv("WORDPRESS_DRY_RUN"), default=True),
         wordpress_draft_first=_parse_bool(os.getenv("WORDPRESS_DRAFT_FIRST"), default=True),
         wordpress_existing_post_policy=existing_post_policy,

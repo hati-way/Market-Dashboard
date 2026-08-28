@@ -162,8 +162,20 @@ WordPress 인증 방식은 두 가지이며 `WORDPRESS_AUTH_MODE`로 선택합�
   `WORDPRESS_USERNAME`/`WORDPRESS_APP_PASSWORD`를 채웁니다.
 - `wordpress_com_oauth2`: Application Password를 지원하지 않는
   WordPress.com Free 플랜용. `WORDPRESS_COM_SITE_ID`(사이트 도메인 또는
-  숫자 site ID)와 `WORDPRESS_COM_ACCESS_TOKEN`(OAuth2 access token,
-  https://developer.wordpress.com/docs/oauth2/ 에서 미리 발급)을 채웁니다.
+  숫자 site ID)와 `WORDPRESS_COM_ACCESS_TOKEN`(OAuth2 access token)을
+  채웁니다. access token이 아직 없다면 curl을 직접 만들 필요 없이:
+
+  1. [developer.wordpress.com/apps](https://developer.wordpress.com/apps/new/)
+     에서 "Web" 타입 앱을 등록하고 `WORDPRESS_COM_CLIENT_ID`/
+     `WORDPRESS_COM_CLIENT_SECRET`/`WORDPRESS_COM_REDIRECT_URI`를 `.env`에
+     채웁니다(`WORDPRESS_COM_SITE_ID`도 필요).
+  2. `python main.py --wordpress-oauth-setup` 실행 → 필요한 값이 있으면
+     WordPress.com 인가(authorization) URL을 자동으로 브라우저에서 열고
+     (안 열리면 URL만 출력), 승인 후 리다이렉트된 URL 전체(또는 code
+     값만)를 터미널에 붙여넣으면 access token을 발급받아 `.env`의
+     `WORDPRESS_COM_ACCESS_TOKEN`만 갱신합니다(다른 값/순서는 보존, 갱신
+     전 `.env.bak.<시각>` 백업 자동 생성). access token/client secret/
+     code는 화면에 출력되지 않습니다.
 
 `.env`에 해당 방식의 값을 채운 뒤:
 

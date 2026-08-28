@@ -67,7 +67,7 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
 | `modules/wordpress_publisher/` | 5단계: 실제 WordPress 발행. `models.py`(PublishOutcome/PublishAction). 기본값은 항상 dry-run + draft-first(안전) |
 | `modules/threads_writer/`, `notebooklm_script/`, `youtube_meta/`, `thumbnail_prompt/` | 6~9단계: 채널별 콘텐츠 생성 |
 | `modules/performance_tracker/` | 10단계: 성과 기록 (현재 미구현) |
-| `clients/` | 외부 API 클라이언트 (`llm_client.py`=Anthropic, `wordpress_client.py`=WordPress REST API 연동 완료, 나머지는 stub) |
+| `clients/` | 외부 API 클라이언트 (`llm_client.py`=Anthropic, `wordpress_client.py`=WordPress REST API 연동 완료, `wordpress_oauth_setup.py`=WordPress.com OAuth2 access token 발급 로컬 helper, 나머지는 stub) |
 | `pipeline/orchestrator.py` | 전체 단계를 순서대로 실행하는 오케스트레이터 |
 | `main.py` | CLI 진입점 |
 | `tests/` | 모듈별 + 파이프라인 전체 테스트 |
@@ -182,6 +182,25 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       `tests/test_wordpress_client.py`(18개, WordPress.com OAuth2
       모드 7개 포함), `tests/test_wordpress_publisher.py`
       (12개), `tests/test_pipeline.py`에 통합 테스트 2개 추가.
+- [x] **WordPress.com OAuth2 access token 발급 자동화**
+      (`clients/wordpress_oauth_setup.py`, `--wordpress-oauth-setup`).
+      `WORDPRESS_COM_CLIENT_ID`/`CLIENT_SECRET`/`REDIRECT_URI`/`SITE_ID`
+      누락 여부만 확인(값은 절대 출력 안 함) → authorization URL 생성 →
+      `webbrowser.open()`으로 자동으로 열어보고 실패하면 URL만 출력 →
+      사용자가 붙여넣은 리다이렉트 URL 전체 또는 code 값에서
+      `extract_code_from_input()`으로 code만 추출 → WordPress.com
+      token endpoint 호출 → 성공 시 `.env`를 먼저
+      `.env.bak.<UTC타임스탬프>`로 백업(`.gitignore`에 `.env.bak*`
+      추가)한 뒤 `update_env_file()`로 `WORDPRESS_COM_ACCESS_TOKEN` 줄만
+      정규식으로 찾아 교체(다른 줄의 내용/순서는 그대로 보존, 없으면
+      끝에 추가). `client_secret`/authorization code/access_token은
+      로그·예외 메시지·화면 출력 어디에도 남기지 않는다. 대화형 I/O
+      (`input_func`/`open_browser_func`/`print_func`)를 주입 가능하게
+      만들어 실제 브라우저/터미널 없이 테스트한다. 이 모듈은
+      `WordPressClient`/`pipeline/orchestrator.py`가 전혀 참조하지
+      않는 로컬 전용 setup helper다. 테스트:
+      `tests/test_wordpress_oauth_setup.py`(22개, 실제 .env는
+      건드리지 않고 tmp_path만 사용).
 - [x] 기본 테스트 스위트
 
 다음에 할 일 (권장 순서):
