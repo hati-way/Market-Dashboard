@@ -3,6 +3,14 @@
 사용 예:
     python main.py --topic "미국 증시 브리핑" --input data/input/sample_market_data.json
 
+실제 LLM(Anthropic)으로 dry-run을 테스트해보려면, facts/sources가
+없는 샘플 시세 데이터보다 아래처럼 facts/sources가 채워진 확장 입력을
+쓰는 것을 권장한다 (그래야 LLM이 근거 없는 숫자를 옮겨 적어 Fact
+Grounding 검증에 걸리는 일이 줄어든다). data/input/sample_treasury_buyback.json
+은 그런 형식의 "테스트 전용" 샘플이며 topic도 파일 안에 있어 --topic을
+생략할 수 있다:
+    python main.py --input data/input/sample_treasury_buyback.json --publish --dry-run
+
 WordPress.com OAuth2 access token이 아직 없다면 먼저:
     python main.py --wordpress-oauth-setup
 (.env의 WORDPRESS_COM_CLIENT_ID/CLIENT_SECRET/REDIRECT_URI/SITE_ID 가
@@ -29,11 +37,15 @@ from pipeline.orchestrator import run_pipeline
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="돈맥 콘텐츠 자동화 파이프라인 실행")
-    parser.add_argument("--topic", help="콘텐츠 주제 (예: '미국 증시 브리핑')")
+    parser.add_argument(
+        "--topic",
+        help="콘텐츠 주제 (예: '미국 증시 브리핑'). 입력 파일에 \"topic\" 필드가 있으면 생략 가능하다.",
+    )
     parser.add_argument(
         "--input",
         default="data/input/sample_market_data.json",
-        help="시장 데이터 JSON 파일 경로",
+        help="시장 데이터 JSON 파일 경로. market_data만 담은 기존 형식과, "
+        "{\"topic\", \"market_data\", \"analysis\"}를 함께 담은 확장 형식을 모두 지원한다.",
     )
     parser.add_argument(
         "--publish",
@@ -86,15 +98,15 @@ def main() -> None:
         _run_wordpress_connection_test()
         return
 
-    if not args.topic:
-        raise SystemExit("--topic 이 필요합니다 (또는 --wordpress-test 로 연결만 확인하세요).")
-
-    content = run_pipeline(
-        topic=args.topic,
-        market_data_path=args.input,
-        publish=args.publish,
-        dry_run=True if args.dry_run else None,
-    )
+    try:
+        content = run_pipeline(
+            topic=args.topic,
+            market_data_path=args.input,
+            publish=args.publish,
+            dry_run=True if args.dry_run else None,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
 
     print(f"완료: {content.meta.id}")
     print(f"품질 검사 통과 여부: {content.quality_check.overall_passed}")

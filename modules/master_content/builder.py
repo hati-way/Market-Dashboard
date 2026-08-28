@@ -9,16 +9,23 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from modules.master_content.schema import MarketData, MasterContent
+from modules.master_content.schema import Analysis, MarketData, MasterContent
 
 DEFAULT_MASTER_DIR = Path("data/master")
 
 
-def build_master_content(topic: str, market_data: MarketData) -> MasterContent:
-    """주제와 시장 데이터로부터 새 MasterContent 를 생성한다."""
+def build_master_content(
+    topic: str, market_data: MarketData, analysis: Analysis | None = None
+) -> MasterContent:
+    """주제와 시장 데이터(+ 선택적으로 analysis)로부터 새 MasterContent 를 생성한다.
+
+    analysis 를 넘기지 않으면 기존과 동일하게 빈 Analysis()로 남는다.
+    """
     content = MasterContent()
     content.meta.topic = topic
     content.market_data = market_data
+    if analysis is not None:
+        content.analysis = analysis
     return content
 
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from clients.llm_client import LlmClient
 from clients.wordpress_client import WordPressClient
-from modules.data_ingest.ingest import load_market_data_from_json_file
+from modules.data_ingest.ingest import load_market_content_input_from_json_file
 from modules.master_content.builder import build_master_content, save_master_content
 from modules.master_content.schema import MasterContent
 from modules.notebooklm_script.generator import generate_notebooklm_script
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_pipeline(
-    topic: str,
+    topic: str | None,
     market_data_path: str | Path,
     publish: bool = False,
     llm_client: LlmClient | None = None,
@@ -45,16 +45,30 @@ def run_pipeline(
     """llm_client 를 넘기지 않으면 3단계에서 실제 Anthropic API를 호출하는
     LlmClient()를 새로 만든다 (테스트에서는 가짜 client를 주입한다).
 
+    market_data_path 는 market_data만 담은 기존(flat) 형식과, market_data
+    /analysis(+topic)를 함께 담은 확장 형식을 둘 다 받을 수 있다
+    (modules.data_ingest.ingest.load_market_content_input_from_json_file
+    참고). topic 은 이 인자로 넘기거나 입력 파일의 "topic" 필드로 줄 수
+    있다 — 인자로 넘긴 topic이 우선하고, 없으면 입력 파일의 topic을
+    쓴다. 둘 다 없으면 ValueError.
+
     publish=True 일 때만 5단계(Quality Gate → Publication Decision →
     WordPress 발행)를 실행한다. wordpress_client/dry_run/draft_first를
     넘기지 않으면 .env 설정값을 따른다(기본값은 항상 안전한 dry-run +
     draft-first).
     """
-    # 1. 데이터 입력
-    market_data = load_market_data_from_json_file(market_data_path)
+    # 1. 데이터 입력 (market_data + 선택적으로 topic/analysis)
+    input_data = load_market_content_input_from_json_file(market_data_path)
+    resolved_topic = topic or input_data.topic
+    if not resolved_topic:
+        raise ValueError(
+            "topic이 필요합니다. --topic 을 넘기거나, 입력 파일에 \"topic\" 필드를 넣어주세요."
+        )
 
-    # 2. Master Content JSON 구조화
-    content = build_master_content(topic=topic, market_data=market_data)
+    # 2. Master Content JSON 구조화 (입력 파일에 analysis가 있으면 함께 채움)
+    content = build_master_content(
+        topic=resolved_topic, market_data=input_data.market_data, analysis=input_data.analysis
+    )
 
     # 3. WordPress 분석글 생성 (Fact Grounding 검증까지 이 안에서 끝남)
     content = generate_wordpress_content(content, llm_client=llm_client)

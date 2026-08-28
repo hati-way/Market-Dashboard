@@ -132,6 +132,19 @@ python main.py --topic "미국 증시 브리핑" --input data/input/sample_marke
 과 같은 형식으로 새 JSON 파일을 만들고 `--input` 옵션에 경로를
 넘기면 됩니다.
 
+실제 Anthropic LLM으로 dry-run을 테스트해보고 싶다면(`--publish
+--dry-run`), `sample_market_data.json`처럼 `analysis.facts/sources`가
+비어 있는 입력보다 `data/input/sample_treasury_buyback.json`을 쓰는
+것을 권장합니다. 이 파일은 `{"topic", "market_data", "analysis"}`를
+함께 담은 확장 입력 형식으로, facts/sources가 채워져 있어 LLM이 근거
+없는 숫자를 만들어 Fact Grounding 검증에 걸리는 일이 줄어듭니다(테스트
+전용 합성 데이터이며, 파일의 `market_data.notes`에 명시되어 있습니다).
+`topic`도 파일 안에 있어 `--topic`을 생략할 수 있습니다:
+
+```bash
+python main.py --input data/input/sample_treasury_buyback.json --publish --dry-run
+```
+
 ### 6. 테스트 실행
 
 각 모듈이 잘 동작하는지 확인합니다.
@@ -144,7 +157,7 @@ pytest
 
 | 단계 | 상태 |
 |---|---|
-| 1. 데이터 입력 | ✅ JSON 파일 기반으로 동작 |
+| 1. 데이터 입력 | ✅ JSON 파일 기반으로 동작 (`market_data`만 담은 기존 형식 + `{"topic", "market_data", "analysis"}`를 함께 담은 확장 형식 모두 지원) |
 | 2. Master JSON 구조화 | ✅ 동작 (`analysis` 필드: primary_question/facts/sources/bull·bear case 등 포함) |
 | 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + Fact Grounding 검증 포함) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |

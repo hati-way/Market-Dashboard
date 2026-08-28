@@ -1,0 +1,120 @@
+{
+  "topic": "미국 재무부 바이백이 금융시장에 미치는 영향",
+  "market_data": {
+    "as_of_date": "2026-08-27",
+    "indices": [
+      {
+        "name": "미국 10년물 국채금리",
+        "value": 4.05,
+        "change_percent": -0.03,
+        "unit": "%"
+      }
+    ],
+    "fx": [
+      {
+        "name": "달러 인덱스(DXY)",
+        "value": 101.2,
+        "change_percent": 0.15,
+        "unit": "pt"
+      }
+    ],
+    "commodities": [],
+    "macro_events": [
+      {
+        "name": "미국 재무부 분기 국채 바이백 발표",
+        "date": "2026-08-27",
+        "actual": "300억 달러 규모",
+        "forecast": "250억~300억 달러 규모",
+        "previous": "280억 달러 규모",
+        "importance": "high"
+      }
+    ],
+    "notes": "테스트 전용 fixture 데이터입니다. 실제 시장 데이터가 아니며, 모든 수치는 실제 LLM으로 wordpress_writer의 Fact Grounding(환각 방지) 검사를 시험하기 위해 임의로 구성되었습니다. 외부 조사 없이 이 파일 안의 값만 사실 근거로 취급하세요.",
+    "raw_source": {}
+  },
+  "analysis": {
+    "primary_question": "미국 재무부의 국채 바이백 확대가 채권·주식 시장에 어떤 영향을 미치는가?",
+    "summary": "재무부가 분기 국채 바이백 규모를 300억 달러로 확대 발표하며 장기금리가 소폭 하락하고 달러 인덱스는 강보합세를 보였다.",
+    "facts": [
+      {
+        "id": "fact_001",
+        "claim": "미국 재무부는 2026년 8월 27일 분기 국채 바이백 규모를 300억 달러로 발표했다.",
+        "value": 300,
+        "unit": "억 달러",
+        "date": "2026-08-27",
+        "source": "U.S. Department of the Treasury",
+        "source_type": "primary",
+        "confidence": "high"
+      },
+      {
+        "id": "fact_002",
+        "claim": "이번 발표 이후 미국 10년물 국채금리는 4.05%로 0.03%p 하락했다.",
+        "value": 4.05,
+        "unit": "%",
+        "date": "2026-08-27",
+        "source": "U.S. Department of the Treasury",
+        "source_type": "primary",
+        "confidence": "high"
+      },
+      {
+        "id": "fact_003",
+        "claim": "같은 날 달러 인덱스(DXY)는 101.2로 0.15% 상승했다.",
+        "value": 101.2,
+        "unit": "pt",
+        "date": "2026-08-27",
+        "source": "ICE",
+        "source_type": "primary",
+        "confidence": "medium"
+      },
+      {
+        "id": "fact_004",
+        "claim": "일부 시장 참가자는 바이백 확대가 유동성 프리미엄을 낮춰 장기물 발행 부담을 완화할 것으로 본다.",
+        "value": null,
+        "unit": null,
+        "date": null,
+        "source": "시장 컨센서스(복수 딜러 서베이)",
+        "source_type": "secondary",
+        "confidence": "low"
+      }
+    ],
+    "sources": [
+      {
+        "name": "U.S. Department of the Treasury",
+        "url": "https://home.treasury.gov/",
+        "source_type": "primary"
+      },
+      {
+        "name": "ICE",
+        "url": "https://www.ice.com/",
+        "source_type": "primary"
+      }
+    ],
+    "causal_chain": [
+      "재무부 바이백 확대",
+      "유동성 부족 구간 국채 매입 증가",
+      "장기금리 하락 압력",
+      "위험자산 심리 개선"
+    ],
+    "market_implications": [
+      "장기 국채 금리 하락 압력",
+      "달러 인덱스 강세 재료로 해석될 가능성"
+    ],
+    "bull_case": [
+      "바이백이 시장 유동성을 개선해 변동성을 낮출 수 있다."
+    ],
+    "bear_case": [
+      "바이백 규모가 예상보다 커지면 재정 건전성 우려가 부각될 수 있다."
+    ],
+    "risks": [
+      "차기 재무부 발표에서 바이백 규모가 축소될 가능성"
+    ],
+    "invalidating_conditions": [
+      "재무부가 바이백 규모를 공식적으로 축소 발표하는 경우"
+    ],
+    "update_triggers": [
+      "다음 분기 재융자 발표(QRA)",
+      "차기 국채 바이백 운영 일정"
+    ],
+    "confidence": "medium"
+  }
+}
