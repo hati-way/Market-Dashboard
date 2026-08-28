@@ -169,7 +169,8 @@ pytest
 | 3. WordPress 글 생성 | ✅ Anthropic Claude 기반 실제 생성 (WordPressArticle 스키마 검증 + Fact Grounding 검증 포함) |
 | 4. 품질 검사 | ✅ 규칙 기반으로 동작 (기준은 추후 조정 가능) |
 | 5. WordPress 발행 | ✅ 실제 REST API 연동 (`clients/wordpress_client.py`). 기본값은 항상 안전(dry-run + draft-first) |
-| 6~9. 채널별 콘텐츠 생성 | ⚠️ 템플릿 기반 placeholder (아직 LLM 미연동, wordpress 결과만 재사용) |
+| 6~9. 채널별 콘텐츠 생성 (단일 WordPress 파이프라인 안) | ⚠️ 템플릿 기반 placeholder 유지 (`pipeline/orchestrator.py`가 씀, 이번 라운드에서 미변경) |
+| 다채널 생성(`--generate-all` 등, WordPress와 독립) | ✅ Threads/NotebookLM/YouTube/Thumbnail 모두 Anthropic Claude 기반 실제 생성 + 공통 Fact Grounding + run_id/manifest 저장. `pipeline/multi_channel.py` |
 | 10. 성과 기록 | ❌ 미구현 |
 | LLM 클라이언트 (`clients/llm_client.py`) | ✅ Anthropic Claude API 연동 (wordpress_writer 에서 사용 중) |
 | Quality Gate (`modules/quality_gate/`) | ✅ fact/seo/aeo/geo/neo 점수 + PASS/REVIEW_REQUIRED/FAIL + 발행 여부 결정. `run_quality_gate_for_content()`로 파이프라인 5단계에 연결됨 |
@@ -210,13 +211,84 @@ WordPress 인증 방식은 두 가지이며 `WORDPRESS_AUTH_MODE`로 선택합�
    `WORDPRESS_DRAFT_FIRST=false`로 의도적으로 바꾸기 전에는 자동 공개
    발행되지 않습니다.
 
+## 다채널 콘텐츠 생성 (Threads / NotebookLM / YouTube / Thumbnail)
+
+WordPress 발행(`--publish`)과 완전히 독립된 별도 파이프라인이다. 각
+채널은 WordPressArticle을 거치지 않고 MasterContent(market_data/analysis)
+를 직접 입력받아 생성한다(WordPress의 해석 오류/문체가 다른 채널로
+전파되는 것을 막기 위함). Fact Grounding 원칙은 모든 채널에 공통으로
+적용된다 — 존재하지 않는 fact id, 근거 없는 금액/퍼센트/날짜는
+FAIL로 막고, confidence=low fact 사용은 REVIEW_REQUIRED로 기록만 한다.
+
+```bash
+# 4개 채널 모두 생성
+python main.py --input data/input/sample_treasury_buyback.json --generate-all
+
+# 필요한 채널만 조합해서 생성
+python main.py --input data/input/sample_treasury_buyback.json --threads --youtube
+
+# 이미 생성한 run_id를 다시 만들려면 --force가 필요하다
+python main.py --input data/input/sample_treasury_buyback.json --generate-all --run-id my-run --force
+```
+
+실행마다 `data/output/{run_id}/` 아래에 다음을 저장한다: `master_content.json`,
+채널별 `threads.json`/`notebooklm.json`/`youtube.json`/`thumbnail.json`,
+그리고 실행 요약을 담은 `manifest.json`(채널별 성공/실패, Fact
+Grounding 상태, 결과 파일 경로, Anthropic API token usage). 한 채널이
+실패해도 나머지 채널은 계속 생성/저장되고, `manifest.json`에 실패
+사유가 남는다. 단, MasterContent 자체를 만들지 못하면(topic 누락 등)
+전체 실행이 중단된다.
+
+## WordPress 타이포그래피 적용 방법
+
+실제 WordPress Draft를 확인해보면 H1/H2 제목 크기가 지나치게 커서
+가독성이 떨어질 수 있다. 테마 PHP/템플릿 파일을 직접 수정하거나 child
+theme/플러그인을 새로 설치하지 않고, WordPress 관리자에서 CSS만
+붙여넣어 안전하게 조정할 수 있도록 [`docs/wordpress_typography.css`](docs/wordpress_typography.css)
+를 준비했다.
+
+**적용 위치(플랜/테마에 따라 다를 수 있음):**
+
+1. **Custom CSS를 쓸 수 있는 경우**: WordPress 관리자 → Appearance
+   (외모) → Editor(편집기) → Styles(스타일) → Additional CSS(추가
+   CSS), 또는 클래식 에디터라면 Appearance → Customize → Additional
+   CSS. `docs/wordpress_typography.css`의 내용을 그대로 붙여넣는다.
+2. **Custom CSS를 쓸 수 없는 경우**(예: WordPress.com Free 플랜은
+   테마에 따라 Additional CSS가 유료 플랜 전용일 수 있다): 먼저 테마의
+   Typography 설정(글꼴 크기 등 Customizer에서 조정 가능한 항목)으로
+   가능한 범위만 조정한다. 이 CSS 파일은 나중에 유료 플랜으로
+   전환하거나 Custom CSS를 지원하는 다른 테마로 바꿀 때 그대로 적용할
+   수 있도록 보관해 둔다.
+
+**현재 사이트에서 실제로 Custom CSS를 쓸 수 있는지는 테마/플랜에 따라
+다르므로 이 문서만으로 단정할 수 없다** — WordPress 관리자에서 위
+경로가 보이는지 직접 확인해야 한다.
+
+**Desktop 기준**: H1 48px/line-height 1.2, H2 32px/1.3, H3 24px/1.35,
+본문 17.5px/line-height 1.8, 최대 폭 720px.
+**Mobile(≤768px) 기준**: H1 34px, H2 27px, H3 22px, 본문 17px — 모두
+`@media (max-width: 768px)` 안에서 적용된다.
+출처 목록(`<h2>출처</h2>` 바로 다음 `<ul>`)은 본문보다 한 단계 작은
+15.5px(모바일 15px)로 구분했다. `!important`는 쓰지 않았다.
+
+`WordPressArticle.title`(H1) 길이 가이드도 이 디자인과 맞춰져 있다 —
+한국어 기준 25~38자 정도를 우선 목표로 하되 의미가 훼손되면 강제
+축약하지 않는다(`modules/wordpress_writer/generator.py`의 시스템
+프롬프트 참고). 지나치게 긴 제목은 기존 Quality Gate의 SEO 점수
+검사(`modules/quality_gate/seo_score.py`, 이번 라운드에서 변경하지
+않음)가 그대로 경고한다.
+
 ## 다음 구현 단계
 
-1. `modules/threads_writer`, `notebooklm_script`, `youtube_meta`,
+1. ~~`modules/threads_writer`, `notebooklm_script`, `youtube_meta`,
    `thumbnail_prompt` — placeholder 로직을
-   `clients/llm_client.LlmClient.generate()` 호출로 교체 (wordpress_writer와
-   동일한 패턴: MasterContent만 근거로 삼고, LLM 응답은 구조화된 스키마로
-   검증한 뒤에만 반영)
+   `clients/llm_client.LlmClient.generate()` 호출로 교체~~ — 완료.
+   `generate_threads_output()`/`generate_notebooklm_output()`/
+   `generate_youtube_output()`/`generate_thumbnail_output()`(각 모듈의
+   `generator.py`)이 실제 구현이다. 기존 placeholder 함수(`generate_
+   threads_content()` 등)는 `pipeline/orchestrator.py`의 단일 WordPress
+   파이프라인이 계속 쓰므로 남겨 두었다(위 "다채널 콘텐츠 생성" 절
+   참고).
 2. `clients/search_console_client.py` + `modules/performance_tracker`
    — Google Search Console 연동
 3. Evergreen 페이지 업데이트(기존 published 글 자동 갱신) 정책 —

@@ -1,0 +1,156 @@
+/*
+ * 돈맥 WordPress 글 타이포그래피 개선 CSS
+ * ------------------------------------------------------------
+ * 적용 방법: README.md의 "WordPress 타이포그래피 적용 방법" 절 참고.
+ * 사용자가 WordPress 관리자(테마/플랜에 따라 Appearance > Editor >
+ * Styles > Additional CSS 등)에 직접 붙여넣는 CSS다. 테마 PHP/템플릿
+ * 파일을 수정하지 않고, child theme이나 플러그인 설치 없이 적용할 수
+ * 있게 만들었다.
+ *
+ * 목표: H1/H2가 지나치게 커서 모바일/데스크톱에서 가독성이 떨어지는
+ * 문제를 해결하고, 금융 리서치 노트에 어울리는 깔끔한 editorial
+ * layout(과도한 카드/박스 디자인 없이)을 만든다.
+ *
+ * 실제 테마의 DOM 구조를 확정적으로 알 수 없으므로, 범용 selector(예:
+ * .entry-title, .wp-block-post-title)와 article 태그 기반의 안전한
+ * fallback selector를 함께 쓴다. !important는 꼭 필요한 곳(테마
+ * 기본값이 더 구체적인 selector로 강하게 지정되어 있어 다른 방법으로
+ * 이기기 어려운 제목류)에만 최소로 사용한다.
+ */
+
+/* ---- 본문 최대 폭: 너무 넓은 한 줄은 오히려 읽기 어렵다 ---- */
+article {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ---- H1 (글 제목) ---- */
+.entry-title,
+.wp-block-post-title,
+article h1 {
+  font-size: 48px;
+  line-height: 1.2;
+  font-weight: 700;
+  margin-bottom: 0.6em;
+  word-break: keep-all; /* 긴 한국어 제목이 한 글자씩 어색하게 줄바꿈되지 않게 */
+  overflow-wrap: break-word;
+}
+
+/* ---- H2 (주요 섹션 제목) ---- */
+article h2 {
+  font-size: 32px;
+  line-height: 1.3;
+  font-weight: 700;
+  margin-top: 2em; /* 섹션 사이 충분한 여백 */
+  margin-bottom: 0.6em;
+  word-break: keep-all;
+}
+
+/* ---- H3 (필요한 경우만) ---- */
+article h3 {
+  font-size: 24px;
+  line-height: 1.35;
+  font-weight: 600;
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+  word-break: keep-all;
+}
+
+/* ---- 본문 문단 ---- */
+article p {
+  font-size: 17.5px;
+  line-height: 1.8;
+  margin-bottom: 1.2em;
+}
+
+/* ---- 목록/불릿 간격 ---- */
+article ul,
+article ol {
+  font-size: 17.5px;
+  line-height: 1.8;
+  margin-bottom: 1.2em;
+  padding-left: 1.4em;
+}
+
+article li {
+  margin-bottom: 0.4em;
+}
+
+/* ---- 링크: 명확히 구분하되 과하지 않게 ---- */
+article a {
+  color: #1a5fb4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+article a:hover,
+article a:focus {
+  color: #123d75;
+}
+
+/* ---- 출처 목록: 본문보다 한 단계 작게 ----
+   wordpress_writer가 만드는 출처 블록은 "<h2>출처</h2>" 다음에 오는
+   <ul>이다 - 그 바로 다음 형제 <ul>만 선택해서 본문 목록과 구분한다. */
+article h2 + ul {
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: #555555;
+}
+
+/* ---- 과도한 카드/박스 디자인 지양: blockquote/table도 절제된 형태로 ---- */
+article blockquote {
+  margin: 1.4em 0;
+  padding: 0.2em 1.2em;
+  border-left: 3px solid #cccccc;
+  color: #444444;
+}
+
+article table {
+  font-size: 16px;
+  line-height: 1.6;
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1.4em;
+}
+
+article table th,
+article table td {
+  border-bottom: 1px solid #e0e0e0;
+  padding: 0.5em 0.8em;
+  text-align: left;
+}
+
+/* ================================================================
+ * Mobile (max-width: 768px)
+ * ================================================================ */
+@media (max-width: 768px) {
+  .entry-title,
+  .wp-block-post-title,
+  article h1 {
+    font-size: 34px;
+    line-height: 1.2;
+  }
+
+  article h2 {
+    font-size: 27px;
+    line-height: 1.3;
+    margin-top: 1.6em;
+  }
+
+  article h3 {
+    font-size: 22px;
+    line-height: 1.35;
+  }
+
+  article p,
+  article ul,
+  article ol {
+    font-size: 17px;
+    line-height: 1.8;
+  }
+
+  article h2 + ul {
+    font-size: 15px;
+  }
+}

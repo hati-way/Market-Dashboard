@@ -3,6 +3,16 @@
 사용 예:
     python main.py --topic "미국 증시 브리핑" --input data/input/sample_market_data.json
 
+Threads/NotebookLM/YouTube/Thumbnail 4개 채널을 MasterContent 하나로부터
+생성하려면(WordPress 발행과 완전히 독립적인 별도 파이프라인이다):
+    python main.py --input data/input/sample_treasury_buyback.json --generate-all
+개별 채널만 생성할 수도 있다(--threads/--notebooklm/--youtube/--thumbnail
+중 필요한 것만 조합):
+    python main.py --input data/input/sample_treasury_buyback.json --threads --youtube
+결과는 data/output/{run_id}/ 아래에 채널별 JSON + manifest.json으로
+저장된다. 같은 run_id로 이미 저장된 결과가 있으면 --force 없이는
+덮어쓰지 않는다.
+
 실제 LLM(Anthropic)으로 dry-run을 테스트해보려면, facts/sources가
 없는 샘플 시세 데이터보다 아래처럼 facts/sources가 채워진 확장 입력을
 쓰는 것을 권장한다 (그래야 LLM이 근거 없는 숫자를 옮겨 적어 Fact
@@ -34,6 +44,12 @@ from clients.wordpress_oauth_setup import run_oauth_setup
 from config.settings import get_settings
 from modules.master_content.schema import MasterContent
 from modules.quality_gate.gate import decide_publication, run_quality_gate_for_content
+from pipeline.multi_channel import (
+    ALL_CHANNELS,
+    MultiChannelInputError,
+    RunAlreadyExistsError,
+    generate_channels,
+)
 from pipeline.orchestrator import run_pipeline
 from pipeline.quality_report import build_quality_gate_report
 
@@ -72,6 +88,25 @@ def parse_args() -> argparse.Namespace:
         help="WordPress.com OAuth2 access token 발급을 대화형으로 진행하고 "
         ".env에 저장한 뒤 종료한다 (curl을 직접 만들 필요 없음).",
     )
+    parser.add_argument(
+        "--generate-all",
+        action="store_true",
+        help="Threads/NotebookLM/YouTube/Thumbnail 4개 채널을 모두 생성한다 "
+        "(WordPress 발행과 독립적인 별도 파이프라인 - --publish를 의미하지 않는다).",
+    )
+    parser.add_argument("--threads", action="store_true", help="Threads 채널만 생성한다.")
+    parser.add_argument("--notebooklm", action="store_true", help="NotebookLM 채널만 생성한다.")
+    parser.add_argument("--youtube", action="store_true", help="YouTube 채널만 생성한다.")
+    parser.add_argument("--thumbnail", action="store_true", help="Thumbnail 채널만 생성한다.")
+    parser.add_argument(
+        "--run-id",
+        help="다채널 생성 결과를 저장할 run_id(data/output/{run_id}/). 생략하면 자동 생성한다.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="같은 run_id의 다채널 생성 결과가 이미 있어도 덮어쓴다.",
+    )
     return parser.parse_args()
 
 
@@ -101,6 +136,48 @@ def _print_quality_gate_report(content: MasterContent) -> None:
     print(build_quality_gate_report(gate_result, decision, draft_first=draft_first))
 
 
+def _requested_channels(args: argparse.Namespace) -> list[str]:
+    if args.generate_all:
+        return list(ALL_CHANNELS)
+    flags = {
+        "threads": args.threads,
+        "notebooklm": args.notebooklm,
+        "youtube": args.youtube,
+        "thumbnail": args.thumbnail,
+    }
+    return [channel for channel in ALL_CHANNELS if flags[channel]]
+
+
+def _run_multi_channel_generation(args: argparse.Namespace, channels: list[str]) -> None:
+    """--generate-all 또는 개별 채널 플래그로 다채널 생성을 실행하고 결과를 출력한다.
+
+    WordPress 발행(--publish)과 완전히 독립적이다 - 이 함수는 WordPress
+    API를 전혀 호출하지 않는다.
+    """
+    try:
+        manifest = generate_channels(
+            market_data_path=args.input,
+            channels=channels,
+            topic=args.topic,
+            run_id=args.run_id,
+            force=args.force,
+        )
+    except (MultiChannelInputError, RunAlreadyExistsError) as exc:
+        raise SystemExit(str(exc))
+
+    print(f"run_id: {manifest['run_id']}")
+    print(f"topic: {manifest['topic']}")
+    print(f"master_content: {manifest['master_content_file']}")
+    for channel, info in manifest["channels"].items():
+        print(f"  [{channel}] status={info['status']} file={info['output_file']}")
+        if info["status"] == "FAIL":
+            print(f"    사유: {info['reason']}")
+    if manifest["usage"]:
+        total_input = sum(u.get("input_tokens") or 0 for u in manifest["usage"])
+        total_output = sum(u.get("output_tokens") or 0 for u in manifest["usage"])
+        print(f"token usage 합계: input={total_input}, output={total_output}")
+
+
 def main() -> None:
     settings = get_settings()
     logging.basicConfig(level=settings.log_level)
@@ -113,6 +190,11 @@ def main() -> None:
 
     if args.wordpress_test:
         _run_wordpress_connection_test()
+        return
+
+    channels = _requested_channels(args)
+    if channels:
+        _run_multi_channel_generation(args, channels)
         return
 
     try:

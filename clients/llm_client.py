@@ -73,6 +73,11 @@ class LlmClient:
             max_retries=max_retries,
         )
 
+    @property
+    def model(self) -> str:
+        """usage 기록(어떤 모델을 썼는지)에 쓰기 위해 노출한다."""
+        return self._model
+
     def generate(
         self,
         user_prompt: str,
@@ -94,6 +99,55 @@ class LlmClient:
         지금은 어떤 모듈도 이 값을 채우지 않으며, 채워지면 그대로
         extra_body 로 전달된다. Sonnet 5를 쓰는 한 비워 두는 것이 안전하다.
         """
+        text, _response = self._generate_raw(
+            user_prompt,
+            system_prompt,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            extra_options=extra_options,
+        )
+        return text
+
+    def generate_with_usage(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        *,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        extra_options: dict[str, object] | None = None,
+    ) -> tuple[str, dict[str, int | None]]:
+        """generate()와 동일하지만 Anthropic 응답의 token usage도 함께 돌려준다.
+
+        usage는 {"input_tokens": int|None, "output_tokens": int|None}
+        형태다. 여러 채널을 생성할 때 API 사용량을 추적하기 위한 것으로,
+        실제 달러 비용은 계산하지 않는다(모델 가격은 바뀔 수 있으므로
+        usage만 저장한다). Anthropic 응답에 usage가 없으면(예: 이론상
+        SDK 버전 차이) None으로 남긴다.
+        """
+        text, response = self._generate_raw(
+            user_prompt,
+            system_prompt,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            extra_options=extra_options,
+        )
+        usage = getattr(response, "usage", None)
+        usage_dict: dict[str, int | None] = {
+            "input_tokens": getattr(usage, "input_tokens", None) if usage else None,
+            "output_tokens": getattr(usage, "output_tokens", None) if usage else None,
+        }
+        return text, usage_dict
+
+    def _generate_raw(
+        self,
+        user_prompt: str,
+        system_prompt: str | None = None,
+        *,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT_SECONDS,
+        extra_options: dict[str, object] | None = None,
+    ) -> tuple[str, object]:
         kwargs: dict[str, object] = {
             "model": self._model,
             "messages": [{"role": "user", "content": user_prompt}],
@@ -137,7 +191,7 @@ class LlmClient:
             logger.error("Anthropic API 호출 중 알 수 없는 오류")
             raise LlmFatalError("Anthropic API 호출 중 알 수 없는 오류가 발생했습니다.") from exc
 
-        return self._extract_text(response)
+        return self._extract_text(response), response
 
     @staticmethod
     def _extract_text(response: object) -> str:

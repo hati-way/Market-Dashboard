@@ -229,35 +229,93 @@ Threads 글, NotebookLM 영상 원고, YouTube 메타데이터, 썸네일 프롬
       테스트: `tests/test_wordpress_writer_style.py`(17개, 새 스타일
       규칙 + seo_title + 출처/내부링크 + 기존 Fact Grounding이 새
       구조에서도 그대로 동작하는지 확인).
+- [x] **6단계 다채널 생성 파이프라인 (Threads/NotebookLM/YouTube/
+      Thumbnail, WordPress 파이프라인과 완전히 독립).** 각 채널은
+      WordPressArticle을 거치지 않고 `MasterContent.market_data/analysis`
+      를 직접 입력받는다(해석 오류/문체가 다른 채널로 전파되지 않게
+      하기 위함, CLAUDE.md 원칙). `modules/threads_writer`,
+      `notebooklm_script`, `youtube_meta`, `thumbnail_prompt` 각각에
+      `generate_<channel>_output(content, *, llm_client=None,
+      usage_log=None) -> MasterContent`를 신규 추가했다(실제 Anthropic
+      Claude 기반). **기존 placeholder 함수(`generate_threads_content()`
+      등)는 그대로 남겨 두었다** — `pipeline/orchestrator.py`의 단일
+      WordPress 파이프라인이 계속 쓰므로 이번 라운드에서 건드리지
+      않았다. 각 채널의 구조화 출력 모델(`ThreadsOutput`,
+      `NotebookLmScriptOutput`, `YouTubeOutput`, `ThumbnailOutput`)은
+      해당 모듈의 `models.py`에 있다. Fact Grounding 로직은
+      `modules/wordpress_writer/fact_validation.py`에서
+      `modules/shared_grounding/fact_validation.py`
+      (`validate_text_grounding(text, used_fact_ids, content)`)로
+      일반화했고, `wordpress_writer`의 `validate_fact_grounding()`은
+      이제 이 함수를 호출하는 얇은 wrapper다(동작은 이전과 완전히
+      동일 — 전체 테스트로 회귀 없음을 확인). 소수점 숫자 환각 검사도
+      `modules/shared_grounding/generation_support.py`로 일반화해 4개
+      채널이 공유한다(단, `wordpress_writer/generator.py` 자체의 기존
+      구현은 손대지 않아 약간의 논리 중복이 남아 있다 — 의도적
+      트레이드오프). `MasterContent.threads/notebooklm/youtube/thumbnail`
+      스키마에 `fact_validation_status`/`fact_validation_warnings`/
+      `used_fact_ids`/`generated_at` 등을 추가 필드로 확장했다(하위
+      호환). `clients/llm_client.py`에 `generate_with_usage()`(텍스트 +
+      token usage) 추가, `LlmClient.model` 프로퍼티 노출.
+      `pipeline/multi_channel.py`의 `generate_channels()`가 MasterContent
+      구성 → 요청된 채널 순차 생성(한 채널 실패해도 나머지는 계속
+      저장, MasterContent 자체 실패면 전체 중단) → `data/output/{run_id}/`
+      에 `master_content.json` + 채널별 JSON + `manifest.json`(채널별
+      상태/사유/파일 경로 + token usage) 저장을 맡는다. 같은 run_id가
+      이미 있으면 `--force` 없이는 덮어쓰지 않는다. `main.py`에
+      `--generate-all`/`--threads`/`--notebooklm`/`--youtube`/
+      `--thumbnail`/`--run-id`/`--force` 추가(`--publish`와 독립).
+      테스트: `tests/test_channel_generators_llm.py`(17개, 채널별 구조
+      검증/Fact Grounding/환각 차단), `tests/test_multi_channel.py`
+      (9개, run_id 공유·manifest·partial failure·force·usage 기록·
+      전체 통합).
+- [x] **WordPress 타이포그래피 CSS 스니펫.** 테마 PHP/템플릿 파일을
+      직접 수정하지 않고, child theme/플러그인 설치 없이 WordPress
+      관리자에 붙여넣을 수 있는 `docs/wordpress_typography.css`를
+      추가했다(Desktop H1 48px/H2 32px/H3 24px/본문 17.5px, Mobile(≤768px)
+      H1 34px/H2 27px/H3 22px/본문 17px, 출처 목록은 본문보다 한 단계
+      작게, `!important` 미사용). `modules/quality_gate/seo_score.py`
+      등 기존 Quality Gate 로직은 전혀 수정하지 않았다. README에
+      적용 방법(Custom CSS 가능/불가 두 경우 모두 안내, 현재 플랜에서
+      가능 여부는 확정하지 않음) 절 추가. 테스트:
+      `tests/test_wordpress_typography.py`(7개, CSS 파일 존재/selector/
+      media query + 기존 H1 중복 방지·heading 순서·제목 길이 검사가
+      여전히 동작하는지 재확인).
 
 다음에 할 일 (권장 순서):
 
-1. **나머지 콘텐츠 생성 모듈을 LLM 기반으로 교체**
-   - `threads_writer`, `notebooklm_script`, `youtube_meta`,
-     `thumbnail_prompt`를 `wordpress_writer`와 같은 패턴으로 교체:
-     MasterContent(+ 이미 생성된 wordpress 필드)를 근거로 프롬프트를
-     만들고, 구조화된 스키마로 응답을 파싱/검증한 뒤에만 반영
-   - 각 모듈의 함수 시그니처는 바꾸지 않는다 (`MasterContent -> MasterContent`),
-     테스트 가능하도록 `llm_client` 주입 파라미터를 추가한다
-2. **`modules/analysis` (또는 유사한) 모듈 추가 검토**
+1. **`modules/analysis` (또는 유사한) 모듈 추가 검토**
    - 지금은 `analysis` 필드를 채우는 전용 모듈이 없어 테스트/수동으로
      직접 채워야 한다. market_data → analysis 를 채우는 단계를 LLM
      기반으로 새로 만들지, 3단계(wordpress_writer) 이전에 별도 단계로
      둘지 결정 필요
-3. **Quality Gate 점수 캘리브레이션** — `modules/quality_gate/seo_score.py`
+2. **Quality Gate 점수 캘리브레이션** — `modules/quality_gate/seo_score.py`
    등의 휴리스틱(keyword_repetition_ratio, 문단 길이 등)은 실제 생성된
    글로 임계값을 재검증할 필요가 있음
-4. **Evergreen 페이지 자동 업데이트** — 지금은 이미 발행된 글을 절대
+3. **Evergreen 페이지 자동 업데이트** — 지금은 이미 발행된 글을 절대
    자동 수정하지 않는다(`WORDPRESS_EXISTING_POST_POLICY`가
    `draft_update`여도 마찬가지). 발행된 글을 최신 데이터로 갱신하는
    기능은 별도 정책/모듈로 설계 필요
-5. **Search Console 연동** — `clients/search_console_client.py` +
+4. **Search Console 연동** — `clients/search_console_client.py` +
    `modules/performance_tracker/tracker.py`
    - 발행된 글의 URL을 기준으로 성과 데이터를 주기적으로 수집해
      `MasterContent.performance`에 append
-6. **Threads API 연동** (선택) — 지금은 텍스트만 생성하고 실제
-   게시는 하지 않음. 필요 시 `clients/threads_client.py`를 새로
-   추가하고 동일한 패턴을 따른다.
+5. **Threads/YouTube/NotebookLM 실제 API 연동** (선택) — 지금은
+   `pipeline/multi_channel.py`가 콘텐츠 생성·검증·저장까지만 한다.
+   실제 자동 게시(Threads API), 업로드(YouTube Data API), NotebookLM
+   직접 연동은 이번 단계에서 의도적으로 구현하지 않았다. 필요 시
+   `clients/threads_client.py` 등을 새로 추가하고 동일한 패턴을
+   따른다.
+6. **`pipeline/orchestrator.py`의 6~9단계를 신규 real-LLM 채널
+   함수로 전환할지 결정** — 지금은 단일 WordPress 파이프라인이
+   기존 placeholder(`generate_threads_content()` 등)를 그대로 쓰고,
+   신규 real-LLM 버전(`generate_threads_output()` 등)은
+   `pipeline/multi_channel.py`만 쓴다. 전환하려면 orchestrator.py가
+   4개 채널 호출에 `llm_client`를 넘기도록 바꿔야 하고, 그러면
+   기존 파이프라인 테스트(`test_pipeline.py` 등)가 채널별로 다른
+   캔 응답을 넣어주는 FakeLlmClient(예: `FakeLlmClient(responses=[...])`)
+   로 업데이트되어야 한다 — 별도 라운드로 분리해 다룰 만한 크기의
+   변경이라 이번 단계에서는 하지 않았다.
 
 ## 새 외부 연동을 추가할 때 체크리스트
 

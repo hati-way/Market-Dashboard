@@ -11,20 +11,45 @@ import pytest
 
 
 class FakeLlmClient:
-    """clients.llm_client.LlmClient 와 같은 generate() 인터페이스를 갖는 더미.
+    """clients.llm_client.LlmClient 와 같은 generate()/generate_with_usage()
+    인터페이스를 갖는 더미.
 
     실제 Anthropic API를 호출하지 않고 미리 정해둔 텍스트를 그대로
     돌려준다. 어떤 프롬프트로 호출되었는지 calls 에 기록해 두어, 필요하면
     테스트에서 프롬프트 내용을 검증할 수 있다.
+
+    response_text(기존 방식, 하위 호환)를 주면 모든 호출에 항상 같은
+    텍스트를 돌려준다. responses(신규)를 리스트로 주면 호출 순서대로
+    하나씩 소비한다 - 한 MasterContent로 여러 채널(threads/notebooklm/
+    youtube/thumbnail)을 순서대로 생성하는 통합 테스트에서, 채널마다
+    다른 캔 응답을 넣어줄 때 쓴다.
     """
 
-    def __init__(self, response_text: str):
+    def __init__(self, response_text: str | None = None, responses: list[str] | None = None):
         self.response_text = response_text
+        self._responses = list(responses) if responses is not None else None
         self.calls: list[dict] = []
+
+    def _next_response(self) -> str:
+        if self._responses is not None:
+            if not self._responses:
+                raise AssertionError("FakeLlmClient: 준비된 응답을 모두 소진했습니다.")
+            return self._responses.pop(0)
+        return self.response_text
 
     def generate(self, user_prompt: str, system_prompt: str | None = None, **kwargs) -> str:
         self.calls.append({"user_prompt": user_prompt, "system_prompt": system_prompt, **kwargs})
-        return self.response_text
+        return self._next_response()
+
+    def generate_with_usage(
+        self, user_prompt: str, system_prompt: str | None = None, **kwargs
+    ) -> tuple[str, dict[str, int | None]]:
+        text = self.generate(user_prompt, system_prompt, **kwargs)
+        return text, {"input_tokens": 100, "output_tokens": 50}
+
+    @property
+    def model(self) -> str:
+        return "fake-model"
 
 
 # 실제 시장 데이터(tests/../data/input/sample_market_data.json)에 있는

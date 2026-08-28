@@ -244,15 +244,39 @@ class ThreadsPost(BaseModel):
 
 
 class ThreadsContent(BaseModel):
-    """6단계: Threads 글."""
+    """6단계: Threads 글.
+
+    hook/key_message/fact_validation_*/used_fact_ids/generated_at은
+    threads_writer가 실제 LLM 기반 생성(generate_threads_output)으로
+    채우는 필드다(추가 필드, 하위 호환). posts는 기존과 동일하게 순서가
+    있는 글 목록이다.
+    """
 
     posts: list[ThreadsPost] = Field(default_factory=list)
+    hook: str = ""
+    key_message: str = ""
+    fact_validation_status: str = ""
+    fact_validation_warnings: list[str] = Field(default_factory=list)
+    used_fact_ids: list[str] = Field(default_factory=list)
+    generated_at: str | None = None
 
 
 class NotebookLmContent(BaseModel):
-    """7단계: NotebookLM 영상 제작용 원고."""
+    """7단계: NotebookLM 영상 제작용 원고.
+
+    title/hook/chapters/fact_validation_*/used_fact_ids/generated_at은
+    notebooklm_script가 실제 LLM 기반 생성(generate_notebooklm_output)
+    으로 채우는 필드다(추가 필드, 하위 호환).
+    """
 
     script: str = ""
+    title: str = ""
+    hook: str = ""
+    chapters: list[str] = Field(default_factory=list)
+    fact_validation_status: str = ""
+    fact_validation_warnings: list[str] = Field(default_factory=list)
+    used_fact_ids: list[str] = Field(default_factory=list)
+    generated_at: str | None = None
 
 
 class YoutubeChapter(BaseModel):
@@ -261,20 +285,45 @@ class YoutubeChapter(BaseModel):
 
 
 class YoutubeMeta(BaseModel):
-    """8단계: YouTube 메타데이터."""
+    """8단계: YouTube 메타데이터.
+
+    title_candidates/fact_validation_*/used_fact_ids/generated_at은
+    youtube_meta가 실제 LLM 기반 생성(generate_youtube_output)으로
+    채우는 필드다(추가 필드, 하위 호환). title은 기존과 동일하게 최종
+    선택된 제목(=recommended_title)을 담는다.
+    """
 
     title: str = ""
+    title_candidates: list[str] = Field(default_factory=list)
     description: str = ""
     chapters: list[YoutubeChapter] = Field(default_factory=list)
     pinned_comment: str = ""
     tags: list[str] = Field(default_factory=list)
+    fact_validation_status: str = ""
+    fact_validation_warnings: list[str] = Field(default_factory=list)
+    used_fact_ids: list[str] = Field(default_factory=list)
+    generated_at: str | None = None
 
 
 class ThumbnailAssets(BaseModel):
-    """9단계: 썸네일용 프롬프트/문구."""
+    """9단계: 썸네일용 프롬프트/문구.
+
+    thumbnail_text_candidates/visual_concept/avoid_elements/
+    fact_validation_*/used_fact_ids/generated_at은 thumbnail_prompt가
+    실제 LLM 기반 생성(generate_thumbnail_output)으로 채우는 필드다
+    (추가 필드, 하위 호환). canva_text는 기존과 동일하게 최종 선택된
+    문구(=recommended_text)를 담는다.
+    """
 
     midjourney_prompt: str = ""
     canva_text: str = ""
+    thumbnail_text_candidates: list[str] = Field(default_factory=list)
+    visual_concept: str = ""
+    avoid_elements: list[str] = Field(default_factory=list)
+    fact_validation_status: str = ""
+    fact_validation_warnings: list[str] = Field(default_factory=list)
+    used_fact_ids: list[str] = Field(default_factory=list)
+    generated_at: str | None = None
 
 
 class PerformanceRecord(BaseModel):
